@@ -1,0 +1,641 @@
+import {
+  canonicalRelativePath,
+  type ArchiveMarkdownInput,
+  type ArchiveMarkdownResult,
+  type CreateMarkdownInput,
+  type CreateMarkdownResult,
+  type FileId,
+  type FileLocator,
+  type FolderId,
+  isMarkdownName,
+  MarkdownGatewayError,
+  type MarkdownFileMetadata,
+  type ListMarkdownInput,
+  type ListMarkdownResult,
+  parseRelativePath,
+  requireContentWithinLimit,
+  requireMarkdownPath,
+  type Revision,
+  type SearchMarkdownInput,
+  type SearchMarkdownResults,
+  type ReadMarkdownInput,
+  type ReadMarkdownResult,
+  type UpdateMarkdownInput,
+  type UpdateMarkdownResult,
+  utf8ByteSize,
+} from "../domain/markdown.js";
+import type {
+  ConditionalWriteResult,
+  DriveNode,
+  DrivePort,
+} from "../drive/drive-port.js";
+
+const DEFAULT_MAX_BYTES = 1_000_000;
+const DEFAULT_SEARCH_LIMIT = 20;
+const MAX_SEARCH_LIMIT = 100;
+const ABSOLUTE_MAX_SEARCH_LIMIT = 1_000;
+
+export interface MarkdownServiceConfig {
+  readonly rootFolderId: FolderId;
+  readonly archiveFolderId: FolderId;
+  readonly maxMarkdownBytes?: number;
+  readonly defaultRecursive?: boolean;
+  readonly defaultSearchLimit?: number;
+  readonly maxSearchLimit?: number;
+}
+
+interface ResolvedNode {
+  readonly node: DriveNode;
+  readonly segments: readonly string[];
+}
+
+export class MarkdownService {
+  private readonly maxMarkdownBytes: number;
+  private readonly defaultRecursive: boolean;
+  private readonly defaultSearchLimit: number;
+  private readonly maxSearchLimit: number;
+
+  constructor(
+    private readonly port: DrivePort,
+    private readonly config: MarkdownServiceConfig,
+  ) {
+    if (
+      !config.rootFolderId ||
+      !config.archiveFolderId ||
+      config.rootFolderId === config.archiveFolderId
+    ) {
+      throw new MarkdownGatewayError(
+        "INVALID_ARCHIVE",
+        "Archive folder must be a descendant of the root.",
+      );
+    }
+    this.maxMarkdownBytes = config.maxMarkdownBytes ?? DEFAULT_MAX_BYTES;
+    this.defaultRecursive = config.defaultRecursive ?? false;
+    this.defaultSearchLimit = config.defaultSearchLimit ?? DEFAULT_SEARCH_LIMIT;
+    this.maxSearchLimit = config.maxSearchLimit ?? MAX_SEARCH_LIMIT;
+    if (
+      !Number.isSafeInteger(this.maxMarkdownBytes) ||
+      this.maxMarkdownBytes < 0 ||
+      !Number.isSafeInteger(this.defaultSearchLimit) ||
+      !Number.isSafeInteger(this.maxSearchLimit) ||
+      this.defaultSearchLimit < 1 ||
+      this.maxSearchLimit < this.defaultSearchLimit ||
+      this.maxSearchLimit > ABSOLUTE_MAX_SEARCH_LIMIT ||
+      typeof this.defaultRecursive !== "boolean"
+    ) {
+      throw new MarkdownGatewayError(
+        "INVALID_CONTENT",
+        "Service limits must be valid positive integers.",
+      );
+    }
+  }
+
+  async listMarkdown(
+    input: ListMarkdownInput = {},
+  ): Promise<ListMarkdownResult> {
+    const recursive = input.recursive ?? this.defaultRecursive;
+    if (typeof recursive !== "boolean") {
+      throw new MarkdownGatewayError(
+        "INVALID_CONTENT",
+        "Recursive listing must be a boolean.",
+      );
+    }
+    const folder = await this.resolveFolderInput(input.path);
+    const candidates = await this.port.listDescendants(
+      folder.node.id as FolderId,
+      {
+        recursive,
+        limit: this.maxSearchLimit,
+      },
+    );
+    const result: MarkdownFileMetadata[] = [];
+    const paths = new Set<string>();
+    for (const candidate of candidates) {
+      const metadata = await this.safeMetadata(candidate);
+      if (
+        metadata &&
+        (recursive
+          ? this.isBelow(metadata.relativePath, folder.segments)
+          : this.isDirectlyBelow(metadata.relativePath, folder.segments))
+      ) {
+        this.assertUniquePath(paths, metadata.relativePath);
+        result.push(metadata);
+      }
+    }
+    return result;
+  }
+
+  async searchMarkdown(
+    input: SearchMarkdownInput,
+  ): Promise<SearchMarkdownResults> {
+    if (typeof input.query !== "string" || input.query.trim().length === 0) {
+      throw new MarkdownGatewayError(
+        "INVALID_CONTENT",
+        "Search query must not be empty.",
+      );
+    }
+    const limit = input.limit ?? this.defaultSearchLimit;
+    if (
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > this.maxSearchLimit
+    ) {
+      throw new MarkdownGatewayError(
+        "INVALID_CONTENT",
+        "Search limit is outside the configured bound.",
+      );
+    }
+    const folder = await this.resolveFolderInput(input.path);
+    const hits = await this.port.searchDescendants(
+      folder.node.id as FolderId,
+      input.query,
+      limit,
+    );
+    const result: SearchMarkdownResults[number][] = [];
+    const paths = new Set<string>();
+    for (const hit of hits) {
+      const metadata = await this.safeMetadata(hit.node);
+      if (metadata && this.isBelow(metadata.relativePath, folder.segments)) {
+        this.assertUniquePath(paths, metadata.relativePath);
+        result.push({
+          ...metadata,
+          ...(hit.excerpt === undefined ? {} : { excerpt: hit.excerpt }),
+        });
+      }
+    }
+    return result.slice(0, limit);
+  }
+
+  async readMarkdown(locator: ReadMarkdownInput): Promise<ReadMarkdownResult> {
+    const resolved = await this.resolveFile(locator);
+    const read = await this.port.readFile(resolved.node.id as FileId);
+    if (!read)
+      throw new MarkdownGatewayError(
+        "NOT_FOUND",
+        "Markdown file was not found.",
+      );
+    const current = await this.resolveVerifiedNode(
+      resolved.node.id as FileId,
+      "file",
+    );
+    if (!this.sameNodeFacts(read.node, current.node)) {
+      throw new MarkdownGatewayError(
+        "UNSUPPORTED",
+        "Drive port returned a different file than requested.",
+      );
+    }
+    this.assertRegularMarkdown(read.node);
+    requireContentWithinLimit(read.content, this.maxMarkdownBytes);
+    if (utf8ByteSize(read.content) !== read.node.size) {
+      throw new MarkdownGatewayError(
+        "UNSUPPORTED",
+        "Drive port content size does not match file metadata.",
+      );
+    }
+    return {
+      ...this.toMetadata(read.node, current.segments),
+      content: read.content,
+    };
+  }
+
+  async createMarkdown(
+    input: CreateMarkdownInput,
+  ): Promise<CreateMarkdownResult> {
+    const segments = requireMarkdownPath(input.path);
+    requireContentWithinLimit(input.content, this.maxMarkdownBytes);
+    const leaf = segments.at(-1);
+    if (!leaf)
+      throw new MarkdownGatewayError("INVALID_PATH", "Path must name a file.");
+    const parent = await this.resolveSegments(segments.slice(0, -1), true);
+    const matches = (
+      await this.port.listChildren(parent.node.id as FolderId)
+    ).filter((node) => node.name === leaf);
+    if (matches.length > 0) {
+      throw new MarkdownGatewayError(
+        matches.length > 1 ? "AMBIGUOUS_PATH" : "INVALID_PATH",
+        "A file or folder already exists at this path.",
+      );
+    }
+    const created = await this.port.createFile(
+      parent.node.id as FolderId,
+      leaf,
+      input.content,
+    );
+    this.assertDirectChild(created, parent.node.id as FolderId);
+    this.assertRegularMarkdown(created);
+    if (
+      created.name !== leaf ||
+      created.size !== utf8ByteSize(input.content) ||
+      !created.revision
+    ) {
+      throw new MarkdownGatewayError(
+        "UNSUPPORTED",
+        "Drive port returned inconsistent create metadata.",
+      );
+    }
+    return this.toMetadata(created, segments);
+  }
+
+  async updateMarkdown(
+    input: UpdateMarkdownInput,
+  ): Promise<UpdateMarkdownResult> {
+    this.requireExpectedRevision(input.expectedRevision);
+    requireContentWithinLimit(input.content, this.maxMarkdownBytes);
+    const resolved = await this.resolveFile(input);
+    const result = await this.port.updateFile(
+      resolved.node.id as FileId,
+      input.expectedRevision,
+      input.content,
+    );
+    return this.handleUpdateResult(result, resolved, input);
+  }
+
+  async archiveMarkdown(
+    input: ArchiveMarkdownInput,
+  ): Promise<ArchiveMarkdownResult> {
+    this.requireExpectedRevision(input.expectedRevision);
+    const resolved = await this.resolveFile(input);
+    const archive = await this.resolveVerifiedNode(
+      this.config.archiveFolderId,
+      "folder",
+    );
+    if (archive.segments.length === 0) {
+      throw new MarkdownGatewayError(
+        "INVALID_ARCHIVE",
+        "Archive folder cannot be the configured root.",
+      );
+    }
+    const destinationMatches = (
+      await this.port.listChildren(archive.node.id as FolderId)
+    ).filter((node) => node.name === resolved.node.name);
+    if (destinationMatches.length > 0) {
+      throw new MarkdownGatewayError(
+        destinationMatches.length > 1 ? "AMBIGUOUS_PATH" : "INVALID_ARCHIVE",
+        "Archive destination already contains this file name.",
+      );
+    }
+    const result = await this.port.moveFile(
+      resolved.node.id as FileId,
+      input.expectedRevision,
+      archive.node.id as FolderId,
+    );
+    return this.handleArchiveResult(result, resolved, archive, [
+      ...archive.segments,
+      resolved.node.name,
+    ]);
+  }
+
+  private async resolveFolderInput(
+    path: string | undefined,
+  ): Promise<ResolvedNode> {
+    return this.resolveSegments(
+      path === undefined ? [] : parseRelativePath(path),
+      true,
+    );
+  }
+
+  private async resolveFile(locator: FileLocator): Promise<ResolvedNode> {
+    const resolved =
+      "path" in locator && locator.path !== undefined
+        ? await this.resolveSegments(requireMarkdownPath(locator.path), false)
+        : await this.resolveVerifiedNode(locator.fileId, "file");
+    this.assertRegularMarkdown(resolved.node);
+    if (
+      resolved.node.size !== undefined &&
+      resolved.node.size > this.maxMarkdownBytes
+    ) {
+      throw new MarkdownGatewayError(
+        "FILE_TOO_LARGE",
+        "Markdown file exceeds the configured limit.",
+      );
+    }
+    return resolved;
+  }
+
+  private async resolveSegments(
+    segments: readonly string[],
+    expectFolder: boolean,
+  ): Promise<ResolvedNode> {
+    const root = await this.getRoot();
+    let current = root;
+    const traversed: string[] = [];
+    for (const [index, segment] of segments.entries()) {
+      const candidates = (
+        await this.port.listChildren(current.id as FolderId)
+      ).filter((node) => node.name === segment);
+      if (candidates.length === 0)
+        throw new MarkdownGatewayError("NOT_FOUND", "Path was not found.");
+      if (candidates.length > 1)
+        throw new MarkdownGatewayError(
+          "AMBIGUOUS_PATH",
+          "Path has duplicate names.",
+        );
+      const child = candidates[0];
+      this.assertDirectChild(child, current.id as FolderId);
+      if (child.kind === "shortcut")
+        throw new MarkdownGatewayError(
+          "UNSUPPORTED",
+          "Shortcuts are not supported.",
+        );
+      const last = index === segments.length - 1;
+      if (!last && child.kind !== "folder")
+        throw new MarkdownGatewayError(
+          "NOT_FOUND",
+          "Path segment is not a folder.",
+        );
+      current = child;
+      traversed.push(segment);
+    }
+    if (expectFolder && current.kind !== "folder")
+      throw new MarkdownGatewayError("NOT_FOUND", "Path is not a folder.");
+    return { node: current, segments: traversed };
+  }
+
+  private async resolveVerifiedNode(
+    id: FileId | FolderId,
+    expectedKind: "file" | "folder",
+  ): Promise<ResolvedNode> {
+    const seen = new Set<string>();
+    const segments: string[] = [];
+    let current = await this.port.getNode(id);
+    if (!current)
+      throw new MarkdownGatewayError("NOT_FOUND", "Drive node was not found.");
+    if (current.id === this.config.rootFolderId) {
+      throw new MarkdownGatewayError(
+        "OUTSIDE_ROOT",
+        "The root folder is not a file target.",
+      );
+    }
+    const leaf = current;
+    while (current.id !== this.config.rootFolderId) {
+      if (seen.has(current.id))
+        throw new MarkdownGatewayError(
+          "OUTSIDE_ROOT",
+          "Drive parent chain contains a cycle.",
+        );
+      seen.add(current.id);
+      if (current.kind === "shortcut")
+        throw new MarkdownGatewayError(
+          "UNSUPPORTED",
+          "Shortcuts are not supported.",
+        );
+      if (current.parentIds.length !== 1)
+        throw new MarkdownGatewayError(
+          "OUTSIDE_ROOT",
+          "Drive node does not have one verified parent.",
+        );
+      segments.unshift(current.name);
+      const parent = await this.port.getNode(current.parentIds[0]);
+      if (!parent)
+        throw new MarkdownGatewayError(
+          "OUTSIDE_ROOT",
+          "Drive parent is missing.",
+        );
+      if (parent.kind !== "folder")
+        throw new MarkdownGatewayError(
+          "OUTSIDE_ROOT",
+          "Drive parent is not a folder.",
+        );
+      current = parent;
+    }
+    if (current.kind !== "folder" || current.parentIds.length > 1) {
+      throw new MarkdownGatewayError(
+        "OUTSIDE_ROOT",
+        "Configured root is not a safe folder.",
+      );
+    }
+    if (leaf.kind !== expectedKind)
+      throw new MarkdownGatewayError(
+        "NOT_FOUND",
+        "Drive node has the wrong kind.",
+      );
+    return { node: leaf, segments };
+  }
+
+  private async getRoot(): Promise<DriveNode> {
+    const root = await this.port.getNode(this.config.rootFolderId);
+    if (root?.kind !== "folder" || root.parentIds.length > 1) {
+      throw new MarkdownGatewayError(
+        "OUTSIDE_ROOT",
+        "Configured root is not a safe folder.",
+      );
+    }
+    return root;
+  }
+
+  private async safeMetadata(
+    node: DriveNode,
+  ): Promise<MarkdownFileMetadata | undefined> {
+    try {
+      const resolved = await this.resolveVerifiedNode(node.id, "file");
+      this.assertRegularMarkdown(resolved.node);
+      if (
+        resolved.node.size === undefined ||
+        resolved.node.size > this.maxMarkdownBytes
+      )
+        return undefined;
+      return this.toMetadata(resolved.node, resolved.segments);
+    } catch (error) {
+      if (error instanceof MarkdownGatewayError) return undefined;
+      throw error;
+    }
+  }
+
+  private assertDirectChild(node: DriveNode, parent: FolderId): void {
+    if (node.parentIds.length !== 1 || node.parentIds[0] !== parent) {
+      throw new MarkdownGatewayError(
+        "OUTSIDE_ROOT",
+        "Drive node escapes its expected parent.",
+      );
+    }
+  }
+
+  private assertRegularMarkdown(node: DriveNode): void {
+    if (
+      typeof node.id !== "string" ||
+      node.id.length === 0 ||
+      typeof node.name !== "string" ||
+      node.name.length === 0 ||
+      typeof node.modifiedTime !== "string" ||
+      Number.isNaN(Date.parse(node.modifiedTime)) ||
+      new Date(node.modifiedTime).toISOString() !== node.modifiedTime
+    ) {
+      throw new MarkdownGatewayError(
+        "UNSUPPORTED",
+        "Drive file has malformed metadata.",
+      );
+    }
+    if (node.kind === "shortcut")
+      throw new MarkdownGatewayError(
+        "UNSUPPORTED",
+        "Shortcuts are not supported.",
+      );
+    if (node.kind !== "file")
+      throw new MarkdownGatewayError("NOT_FOUND", "Path is not a file.");
+    if (!isMarkdownName(node.name))
+      throw new MarkdownGatewayError(
+        "NOT_MARKDOWN",
+        "Only Markdown files are supported.",
+      );
+    if (
+      !node.revision ||
+      node.size === undefined ||
+      !Number.isSafeInteger(node.size) ||
+      node.size < 0
+    ) {
+      throw new MarkdownGatewayError(
+        "UNSUPPORTED",
+        "Drive file lacks required metadata.",
+      );
+    }
+  }
+
+  private toMetadata(
+    node: DriveNode,
+    segments: readonly string[],
+  ): MarkdownFileMetadata {
+    this.assertRegularMarkdown(node);
+    return {
+      relativePath: canonicalRelativePath(segments),
+      fileId: node.id as FileId,
+      revision: node.revision as Revision,
+      modifiedTime: node.modifiedTime,
+      size: node.size as number,
+    };
+  }
+
+  private handleUpdateResult(
+    result: ConditionalWriteResult,
+    resolved: ResolvedNode,
+    input: UpdateMarkdownInput,
+  ): MarkdownFileMetadata {
+    this.throwConditionalFailure(result);
+    const node = result.node;
+    if (
+      !this.sameNodeIdentityAndLocation(node, resolved.node) ||
+      node.size !== utf8ByteSize(input.content) ||
+      node.revision === input.expectedRevision
+    ) {
+      throw new MarkdownGatewayError(
+        "UNSUPPORTED",
+        "Drive port returned inconsistent update metadata.",
+      );
+    }
+    return this.toMetadata(node, resolved.segments);
+  }
+
+  private handleArchiveResult(
+    result: ConditionalWriteResult,
+    resolved: ResolvedNode,
+    archive: ResolvedNode,
+    segments: readonly string[],
+  ): MarkdownFileMetadata {
+    this.throwConditionalFailure(result);
+    const node = result.node;
+    if (
+      node.id !== resolved.node.id ||
+      node.name !== resolved.node.name ||
+      node.revision === resolved.node.revision
+    ) {
+      throw new MarkdownGatewayError(
+        "UNSUPPORTED",
+        "Drive port returned inconsistent archive metadata.",
+      );
+    }
+    this.assertDirectChild(node, archive.node.id as FolderId);
+    return this.toMetadata(node, segments);
+  }
+
+  private throwConditionalFailure(
+    result: ConditionalWriteResult,
+  ): asserts result is Extract<
+    ConditionalWriteResult,
+    { readonly outcome: "success" }
+  > {
+    if (result.outcome === "unsupported") {
+      throw new MarkdownGatewayError(
+        "UNSUPPORTED",
+        "Drive port cannot safely perform this operation.",
+      );
+    }
+    if (result.outcome === "conflict") {
+      throw new MarkdownGatewayError(
+        "CONFLICT",
+        "The Markdown file changed before this operation.",
+        {
+          ...(result.current
+            ? { currentRevision: result.current.revision ?? "unknown" }
+            : {}),
+        },
+      );
+    }
+  }
+
+  private requireExpectedRevision(value: Revision): void {
+    if (typeof value !== "string" || value.length === 0) {
+      throw new MarkdownGatewayError(
+        "CONFLICT",
+        "An expected revision is required.",
+      );
+    }
+  }
+
+  private isBelow(path: string, folderSegments: readonly string[]): boolean {
+    const candidate = parseRelativePath(path);
+    return folderSegments.every(
+      (segment, index) => candidate[index] === segment,
+    );
+  }
+
+  private isDirectlyBelow(
+    path: string,
+    folderSegments: readonly string[],
+  ): boolean {
+    return (
+      this.isBelow(path, folderSegments) &&
+      parseRelativePath(path).length === folderSegments.length + 1
+    );
+  }
+
+  private assertUniquePath(paths: Set<string>, path: string): void {
+    if (paths.has(path)) {
+      throw new MarkdownGatewayError(
+        "AMBIGUOUS_PATH",
+        "Drive returned duplicate canonical file paths.",
+      );
+    }
+    paths.add(path);
+  }
+
+  private sameNodeFacts(left: DriveNode, right: DriveNode): boolean {
+    return (
+      this.sameNodeFactsExceptRevision(left, right) &&
+      left.revision === right.revision
+    );
+  }
+
+  private sameNodeFactsExceptRevision(
+    left: DriveNode,
+    right: DriveNode,
+  ): boolean {
+    return (
+      this.sameNodeIdentityAndLocation(left, right) &&
+      left.size === right.size &&
+      left.modifiedTime === right.modifiedTime
+    );
+  }
+
+  private sameNodeIdentityAndLocation(
+    left: DriveNode,
+    right: DriveNode,
+  ): boolean {
+    return (
+      left.id === right.id &&
+      left.name === right.name &&
+      left.kind === right.kind &&
+      left.mimeType === right.mimeType &&
+      left.parentIds.length === right.parentIds.length &&
+      left.parentIds.every((parent, index) => parent === right.parentIds[index])
+    );
+  }
+}

@@ -46,7 +46,8 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - Local task review: `No findings` after two repair passes.
 - No live Drive request was made. Production writes remain disabled until an operator runs the
   documented probe against dedicated marked folders and obtains a supported, cleaned-up result.
-- Status: complete; commit pending
+- Status: complete
+- Commit: `4afd845` (`build live Drive capability harness`)
 
 ## 2026-08-29 — specifications shaped ahead of implementation
 
@@ -64,4 +65,15 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - Validation: frozen install, full `CI=true pnpm check`, diff check, credential scan, and vendored
   skills all passed; the combined tree had 67 fake-only tests.
 - No signing, live Drive, Work, Codex, or credential operation was performed.
+- Status: complete
+- Commit: `f121f95` (`build fail-closed Drive write gate`)
+
+## 2026-08-29 — 01-drive-core / 001-domain-contracts-and-safe-resolution
+
+- Implementation and bounded repair: `gpt-5.6-terra`, medium reasoning; this was pure domain and
+  in-memory-port work with no provider calls or credentials.
+- Root review strengthened cross-platform path rejection, list/search ambiguity and depth checks,
+  read-time ancestry verification, provider-result consistency, and archive destination safety.
+- Validation: full combined `CI=true pnpm check` passed with 67 tests, plus diff and credential
+  scans. All new application tests are fake-only.
 - Status: complete; commit pending
