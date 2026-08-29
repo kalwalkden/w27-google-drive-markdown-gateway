@@ -30,9 +30,30 @@ import {
 export const maxEvidenceBytes = 1_000_000;
 export const maxCompactJwsBytes = 16_384;
 
-export interface WriteLease {
-  /** Opaque process-local capability. It is never suitable for logs or durable storage. */
-  readonly value: string;
+const leaseConstructionKey = Symbol("write-lease-construction-key");
+
+/** Opaque process-local capability. It is never suitable for logs or durable storage. */
+export class WriteLease {
+  readonly #value: string;
+
+  /** @internal Construction is rejected unless it originates in this module. */
+  constructor(value: string, key: symbol) {
+    if (key !== leaseConstructionKey) {
+      throw new TypeError(
+        "WriteLease cannot be constructed outside WriteGate.",
+      );
+    }
+    this.#value = value;
+  }
+
+  /** @internal Used only by WriteGate to validate process-local capability identity. */
+  valueForGate(): string {
+    return this.#value;
+  }
+}
+
+function issueLease(value: string): WriteLease {
+  return new WriteLease(value, leaseConstructionKey);
 }
 
 export type WriteGateDecision =
@@ -271,10 +292,11 @@ export class WriteGate {
     }
     if (!(material instanceof Uint8Array) || material.byteLength !== 32)
       return deny("lease-generation-failed");
-    const lease = { value: Buffer.from(material).toString("base64url") };
-    if (!isLeaseValue(lease.value)) return deny("lease-generation-failed");
+    const leaseValue = Buffer.from(material).toString("base64url");
+    if (!isLeaseValue(leaseValue)) return deny("lease-generation-failed");
+    const lease = issueLease(leaseValue);
     this.removeExpiredLeases(now.getTime());
-    this.leases.set(lease.value, {
+    this.leases.set(leaseValue, {
       expiresAtMs: leaseExpiresAtMs,
     });
     return { allowed: true, lease, audit: allowedAudit() };
@@ -285,9 +307,10 @@ export class WriteGate {
     const current = this.sampleClock();
     if (!current) return deny("clock-invalid");
     const now = current.getTime();
-    let value: unknown;
+    if (!(lease instanceof WriteLease)) return deny("lease-invalid");
+    let value: string;
     try {
-      value = lease?.value;
+      value = lease.valueForGate();
     } catch {
       return deny("lease-invalid");
     }
@@ -299,7 +322,7 @@ export class WriteGate {
       return deny("lease-expired");
     }
     this.removeExpiredLeases(now);
-    return { allowed: true, lease: { value }, audit: allowedAudit() };
+    return { allowed: true, lease, audit: allowedAudit() };
   }
 
   private removeExpiredLeases(now: number): void {

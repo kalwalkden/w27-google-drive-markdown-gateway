@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   WriteGate,
+  type WriteLease,
   maxCompactJwsBytes,
   maxEvidenceBytes,
   type WriteGateDependencies,
@@ -206,12 +207,14 @@ describe("write gate", () => {
       allowed: false,
       reason: "lease-expired",
     });
-    expect(gate.validateLease({ value: "fabricated" })).toMatchObject({
+    expect(
+      gate.validateLease({ value: "fabricated" } as unknown as WriteLease),
+    ).toMatchObject({
       allowed: false,
       reason: "lease-invalid",
     });
     expect(
-      gate.validateLease(undefined as unknown as { readonly value: string }),
+      gate.validateLease(undefined as unknown as WriteLease),
     ).toMatchObject({ allowed: false, reason: "lease-invalid" });
 
     const malformedRandom = new WriteGate({

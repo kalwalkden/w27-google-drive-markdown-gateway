@@ -1,4 +1,4 @@
-import type { WriteGate, WriteLease } from "../write-gate/gate.js";
+import { WriteGate, type WriteLease } from "../write-gate/gate.js";
 import type {
   ConditionalWriteResult,
   CreateWriteResult,
@@ -6,21 +6,45 @@ import type {
 } from "./drive-port.js";
 import type { FileId, FolderId, Revision } from "../domain/markdown.js";
 
-/** The only mutation boundary available to the application service. */
-export interface GuardedDriveWriter {
-  createFile(
+const writerConstructionKey = Symbol("guarded-drive-writer-construction-key");
+
+/**
+ * Nominal application write capability. Only this module can compose one with
+ * a real WriteGate, so a structural object cannot bypass lease validation.
+ */
+export abstract class GuardedDriveWriter {
+  readonly #capabilityBrand = true;
+
+  protected constructor(key: symbol) {
+    if (key !== writerConstructionKey) {
+      throw new TypeError(
+        "GuardedDriveWriter cannot be constructed outside this module.",
+      );
+    }
+  }
+
+  static isCapability(value: unknown): value is GuardedDriveWriter {
+    if (!(value instanceof GuardedDriveWriter)) return false;
+    try {
+      return value.#capabilityBrand;
+    } catch {
+      return false;
+    }
+  }
+
+  abstract createFile(
     lease: WriteLease,
     parentId: FolderId,
     name: string,
     content: string,
   ): Promise<CreateWriteResult>;
-  updateFile(
+  abstract updateFile(
     lease: WriteLease,
     fileId: FileId,
     expectedRevision: Revision,
     content: string,
   ): Promise<ConditionalWriteResult>;
-  moveFile(
+  abstract moveFile(
     lease: WriteLease,
     fileId: FileId,
     expectedRevision: Revision,
@@ -33,11 +57,16 @@ export interface GuardedDriveWriter {
  * Revalidates process-local authority at the last synchronous step before a
  * provider mutation. Evaluation belongs to operator-controlled composition.
  */
-export class GuardedDriveWritePort implements GuardedDriveWriter {
+export class GuardedDriveWritePort extends GuardedDriveWriter {
   constructor(
-    private readonly gate: Pick<WriteGate, "validateLease">,
+    private readonly gate: WriteGate,
     private readonly raw: RawDriveWritePort,
-  ) {}
+  ) {
+    super(writerConstructionKey);
+    if (!(gate instanceof WriteGate)) {
+      throw new TypeError("GuardedDriveWritePort requires a WriteGate.");
+    }
+  }
 
   createFile(
     lease: WriteLease,
@@ -80,7 +109,11 @@ export class GuardedDriveWritePort implements GuardedDriveWriter {
 }
 
 /** Safe default until deployment supplies evidence, trust, replay, and approval. */
-export class DisabledDriveWritePort implements GuardedDriveWriter {
+export class DisabledDriveWritePort extends GuardedDriveWriter {
+  constructor() {
+    super(writerConstructionKey);
+  }
+
   createFile(
     _lease: WriteLease,
     _parentId: FolderId,

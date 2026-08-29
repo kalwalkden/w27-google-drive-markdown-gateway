@@ -384,12 +384,16 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
     );
     if (response === notFound) return undefined;
     const resource = response.data as DriveFileResource;
+    const node = normalizeNode(
+      resource,
+      operation,
+      headerValue(response.headers, "etag"),
+    );
+    if (node.id !== id) {
+      throw new GoogleDriveProviderError("malformed", operation);
+    }
     return {
-      node: normalizeNode(
-        resource,
-        operation,
-        headerValue(response.headers, "etag"),
-      ),
+      node,
       driveId: requiredOptionalString(resource.driveId, operation),
     };
   }

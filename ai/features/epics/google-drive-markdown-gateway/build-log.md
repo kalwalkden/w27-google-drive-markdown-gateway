@@ -190,3 +190,17 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - No credential, issuer/JWKS, live Drive, or external network call was made. A response deadline
   cannot cancel an already-dispatched provider mutation, so write operations are never retried.
 - Status: complete; independent task review pending
+
+## 2026-08-29 — 01-drive-core independent feature-review repair
+
+- Independent review: `gpt-5.6-sol`, high reasoning, fresh read-only context. Verdict was
+  `Not ready` after finding topology races, structurally forgeable write authority, unsafe nested
+  segments, unbound metadata IDs, surrogate rewriting, and weak fake concurrency behavior.
+- Repair: `gpt-5.6-terra`, high reasoning. Nested mutations now fail closed; archive is disabled
+  until a provider boundary can prove destination topology atomically. Guarded writers, gates, and
+  leases are nominal/runtime-checked, including subclass and prototype-forgery denial.
+- Added exact metadata-ID binding, safe provider-segment checks before mutation, well-formed UTF-16
+  enforcement, opaque fake revisions, source-parent conflicts, and two-actor/default-deny tests.
+- Validation: 76 focused tests and full combined `CI=true pnpm check` passed with 131 tests, plus
+  diff checking. No live Drive, credential, or network operation ran.
+- Status: repaired; independent feature-review rerun pending

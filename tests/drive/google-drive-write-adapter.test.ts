@@ -151,4 +151,16 @@ describe("GoogleDriveWriteAdapter", () => {
       adapter.createFile(folderId("docs"), "new.md", "hey"),
     ).resolves.toEqual({ outcome: "unsupported" });
   });
+
+  it("refuses unpaired UTF-16 content before constructing an upload", async () => {
+    const http = new CapturingHttp();
+    const adapter = new GoogleDriveWriteAdapter(http);
+    await expect(
+      adapter.createFile(folderId("docs"), "new.md", "\ud800"),
+    ).resolves.toEqual({ outcome: "unsupported" });
+    await expect(
+      adapter.updateFile(fileId("file"), revision('"old"'), "\udc00"),
+    ).resolves.toEqual({ outcome: "unsupported" });
+    expect(http.requests).toHaveLength(0);
+  });
 });

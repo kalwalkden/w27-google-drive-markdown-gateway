@@ -42,6 +42,7 @@ export class InMemoryDrivePort implements DriveReadPort, RawDriveWritePort {
   private readonly nodes = new Map<string, MutableNode>();
   private nextId = 1;
   private nextTick = 0;
+  private nextRevision = 1;
 
   constructor(private readonly epoch = "2026-01-01T00:00:00.000Z") {}
 
@@ -175,7 +176,7 @@ export class InMemoryDrivePort implements DriveReadPort, RawDriveWritePort {
       return { outcome: "conflict", current: this.snapshot(node) };
     node.content = content;
     node.size = utf8ByteSize(content);
-    node.revision = revision(String(Number(node.revision) + 1));
+    node.revision = this.nextOpaqueRevision();
     node.modifiedTime = this.timestamp();
     return { outcome: "success", node: this.snapshot(node) };
   }
@@ -188,10 +189,14 @@ export class InMemoryDrivePort implements DriveReadPort, RawDriveWritePort {
   ): Promise<ConditionalWriteResult> {
     const node = this.nodes.get(id);
     if (node?.kind !== "file") return { outcome: "unsupported" };
-    if (node.revision !== expected)
+    if (
+      node.revision !== expected ||
+      node.parentIds.length !== 1 ||
+      node.parentIds[0] !== _source
+    )
       return { outcome: "conflict", current: this.snapshot(node) };
     node.parentIds = [destination];
-    node.revision = revision(String(Number(node.revision) + 1));
+    node.revision = this.nextOpaqueRevision();
     node.modifiedTime = this.timestamp();
     return { outcome: "success", node: this.snapshot(node) };
   }
@@ -209,6 +214,12 @@ export class InMemoryDrivePort implements DriveReadPort, RawDriveWritePort {
     return new Date(
       new Date(this.epoch).getTime() + this.nextTick++,
     ).toISOString();
+  }
+
+  private nextOpaqueRevision(): Revision {
+    const value = `fake-revision-${String(this.nextRevision).padStart(6, "0")}`;
+    this.nextRevision += 1;
+    return revision(value);
   }
 
   private snapshot(node: MutableNode): DriveNode {

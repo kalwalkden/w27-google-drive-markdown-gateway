@@ -32,7 +32,7 @@ import type {
 } from "../drive/drive-port.js";
 import {
   DisabledDriveWritePort,
-  type GuardedDriveWriter,
+  GuardedDriveWriter,
 } from "../drive/guarded-drive-write-port.js";
 import type { WriteLease } from "../write-gate/gate.js";
 
@@ -72,6 +72,12 @@ export class MarkdownService {
     private readonly config: MarkdownServiceConfig,
     private readonly writer: GuardedDriveWriter = new DisabledDriveWritePort(),
   ) {
+    if (!GuardedDriveWriter.isCapability(writer)) {
+      throw new MarkdownGatewayError(
+        "UNSUPPORTED",
+        "MarkdownService requires a guarded write capability.",
+      );
+    }
     if (
       !config.rootFolderId ||
       !config.archiveFolderId ||
@@ -232,6 +238,7 @@ export class MarkdownService {
     if (!leaf)
       throw new MarkdownGatewayError("INVALID_PATH", "Path must name a file.");
     const parent = await this.resolveSegments(segments.slice(0, -1), true);
+    this.assertCreateTopology(parent);
     const matches = (
       await this.port.listChildren(parent.node.id as FolderId)
     ).filter((node) => node.name === leaf);
@@ -271,6 +278,7 @@ export class MarkdownService {
     this.requireExpectedRevision(input.expectedRevision);
     requireContentWithinLimit(input.content, this.maxMarkdownBytes);
     const resolved = await this.resolveFile(input);
+    this.assertClosedMutationTopology(resolved);
     const result = await this.writer.updateFile(
       lease,
       resolved.node.id as FileId,
@@ -284,38 +292,13 @@ export class MarkdownService {
     input: ArchiveMarkdownInput,
     lease: WriteLease,
   ): Promise<ArchiveMarkdownResult> {
-    this.requireExpectedRevision(input.expectedRevision);
-    const resolved = await this.resolveFile(input);
-    const archive = await this.resolveVerifiedNode(
-      this.config.archiveFolderId,
-      "folder",
+    void input;
+    void lease;
+    // A file ETag cannot bind the archive folder's parent chain.
+    throw new MarkdownGatewayError(
+      "UNSUPPORTED",
+      "Archive is unavailable without atomic destination topology proof.",
     );
-    if (archive.segments.length === 0) {
-      throw new MarkdownGatewayError(
-        "INVALID_ARCHIVE",
-        "Archive folder cannot be the configured root.",
-      );
-    }
-    const destinationMatches = (
-      await this.port.listChildren(archive.node.id as FolderId)
-    ).filter((node) => node.name === resolved.node.name);
-    if (destinationMatches.length > 0) {
-      throw new MarkdownGatewayError(
-        destinationMatches.length > 1 ? "AMBIGUOUS_PATH" : "INVALID_ARCHIVE",
-        "Archive destination already contains this file name.",
-      );
-    }
-    const result = await this.writer.moveFile(
-      lease,
-      resolved.node.id as FileId,
-      input.expectedRevision,
-      resolved.node.parentIds[0] as FolderId,
-      archive.node.id as FolderId,
-    );
-    return this.handleArchiveResult(result, resolved, archive, [
-      ...archive.segments,
-      resolved.node.name,
-    ]);
   }
 
   private async resolveFolderInput(
@@ -365,6 +348,7 @@ export class MarkdownService {
         );
       const child = candidates[0];
       this.assertDirectChild(child, current.id as FolderId);
+      this.assertSafeDriveName(child.name);
       if (child.kind === "shortcut")
         throw new MarkdownGatewayError(
           "UNSUPPORTED",
@@ -438,6 +422,7 @@ export class MarkdownService {
         "Configured root is not a safe folder.",
       );
     }
+    this.assertSafeDriveName(current.name);
     if (leaf.kind !== expectedKind)
       throw new MarkdownGatewayError(
         "NOT_FOUND",
@@ -454,7 +439,38 @@ export class MarkdownService {
         "Configured root is not a safe folder.",
       );
     }
+    this.assertSafeDriveName(root.name);
     return root;
+  }
+
+  /**
+   * The provider offers no conditional precondition for an arbitrary ancestor
+   * chain. Mutations therefore stay at depth one, where the configured root is
+   * the immutable boundary and no mutable ancestor can race resolution.
+   */
+  private assertCreateTopology(parent: ResolvedNode): void {
+    if (
+      parent.segments.length !== 0 ||
+      parent.node.id !== this.config.rootFolderId
+    ) {
+      throw new MarkdownGatewayError(
+        "UNSUPPORTED",
+        "Nested Markdown mutations are unavailable without atomic topology proof.",
+      );
+    }
+  }
+
+  private assertClosedMutationTopology(resolved: ResolvedNode): void {
+    if (
+      resolved.segments.length !== 1 ||
+      resolved.node.parentIds.length !== 1 ||
+      resolved.node.parentIds[0] !== this.config.rootFolderId
+    ) {
+      throw new MarkdownGatewayError(
+        "UNSUPPORTED",
+        "Nested Markdown mutations are unavailable without atomic topology proof.",
+      );
+    }
   }
 
   private async safeMetadata(
@@ -572,28 +588,6 @@ export class MarkdownService {
       );
     }
     return this.toMetadata(node, resolved.segments);
-  }
-
-  private handleArchiveResult(
-    result: ConditionalWriteResult,
-    resolved: ResolvedNode,
-    archive: ResolvedNode,
-    segments: readonly string[],
-  ): MarkdownFileMetadata {
-    this.throwConditionalFailure(result);
-    const node = result.node;
-    if (
-      node.id !== resolved.node.id ||
-      node.name !== resolved.node.name ||
-      node.revision === resolved.node.revision
-    ) {
-      throw new MarkdownGatewayError(
-        "UNSUPPORTED",
-        "Drive port returned inconsistent archive metadata.",
-      );
-    }
-    this.assertDirectChild(node, archive.node.id as FolderId);
-    return this.toMetadata(node, segments);
   }
 
   private throwConditionalFailure(

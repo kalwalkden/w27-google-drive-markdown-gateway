@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 
 import {
+  assertWellFormedUtf16,
   fileId,
   folderId,
   revision,
@@ -51,6 +52,11 @@ export class GoogleDriveWriteAdapter implements RawDriveWritePort {
     name: string,
     content: string,
   ): Promise<CreateWriteResult> {
+    try {
+      assertWellFormedUtf16(content);
+    } catch {
+      return { outcome: "unsupported" };
+    }
     const metadata = JSON.stringify({
       name,
       mimeType: "text/markdown",
@@ -80,6 +86,11 @@ export class GoogleDriveWriteAdapter implements RawDriveWritePort {
     content: string,
   ): Promise<ConditionalWriteResult> {
     if (!isEntityTag(expectedRevision)) return { outcome: "unsupported" };
+    try {
+      assertWellFormedUtf16(content);
+    } catch {
+      return { outcome: "unsupported" };
+    }
     const response = await this.send({
       method: "PATCH",
       url: driveUrl(`/upload/drive/v3/files/${encodeURIComponent(id)}`, {

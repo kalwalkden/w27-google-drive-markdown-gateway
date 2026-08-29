@@ -15,31 +15,43 @@ import type {
   DriveSearchHit,
   RawDriveWritePort,
 } from "../../src/drive/drive-port.js";
-import type { GuardedDriveWriter } from "../../src/drive/guarded-drive-write-port.js";
-import type { WriteLease } from "../../src/write-gate/gate.js";
+import { GuardedDriveWritePort } from "../../src/drive/guarded-drive-write-port.js";
+import { WriteGate } from "../../src/write-gate/gate.js";
+import { InMemoryConsumedApprovalStore } from "../../src/write-gate/replay-store.js";
+import {
+  compactHeader,
+  evidenceBytes,
+  validApproval,
+  validEvidence,
+  validTrust,
+} from "../write-gate/fixtures.js";
 
-const testLease: WriteLease = { value: "test-only-lease" };
+async function issueTestCapability() {
+  const evidence = validEvidence();
+  const bytes = evidenceBytes(evidence);
+  const gate = new WriteGate({
+    trust: validTrust(),
+    replayStore: new InMemoryConsumedApprovalStore(() =>
+      Date.parse("2026-01-01T00:03:00.000Z"),
+    ),
+    clock: { now: () => new Date("2026-01-01T00:03:00.000Z") },
+    verifier: { verify: async () => validApproval(bytes) },
+    randomBytes: () => new Uint8Array(32).fill(7),
+  });
+  const decision = await gate.evaluate({
+    evidence,
+    evidenceBytes: bytes,
+    approvalJws: compactHeader(),
+  });
+  if (!decision.allowed) throw new Error("test lease was denied");
+  return { gate, lease: decision.lease };
+}
 
-function writerFrom(raw: RawDriveWritePort): GuardedDriveWriter {
-  return {
-    createFile: (_lease, parentId, name, content) =>
-      raw.createFile(parentId, name, content),
-    updateFile: (_lease, fileId, expectedRevision, content) =>
-      raw.updateFile(fileId, expectedRevision, content),
-    moveFile: (
-      _lease,
-      fileId,
-      expectedRevision,
-      sourceFolderId,
-      destinationFolderId,
-    ) =>
-      raw.moveFile(
-        fileId,
-        expectedRevision,
-        sourceFolderId,
-        destinationFolderId,
-      ),
-  };
+const testCapability = await issueTestCapability();
+const testLease = testCapability.lease;
+
+function writerFrom(raw: RawDriveWritePort): GuardedDriveWritePort {
+  return new GuardedDriveWritePort(testCapability.gate, raw);
 }
 
 function fixture() {
@@ -69,6 +81,13 @@ function fixture() {
     kind: "file",
     parentIds: ["docs"],
     content: "hello release plan",
+  });
+  drive.addFixture({
+    id: "root-file",
+    name: "root-file.md",
+    kind: "file",
+    parentIds: ["root"],
+    content: "root content",
   });
   drive.addFixture({
     id: "nested-file",
@@ -160,41 +179,40 @@ describe("MarkdownService", () => {
     );
   });
 
-  it("creates, conditionally updates, and archives while retaining the file ID", async () => {
+  it("creates and conditionally updates direct-root files", async () => {
     const { drive, session } = fixture();
     const created = await session.createMarkdown({
-      path: "docs/new.md",
+      path: "new.md",
       content: "é",
     });
-    expect(created.relativePath).toBe("docs/new.md");
+    expect(created.relativePath).toBe("new.md");
     const updated = await session.updateMarkdown({
       fileId: created.fileId,
       expectedRevision: created.revision,
       content: "new",
     });
-    expect(updated.revision).toBe(revision("2"));
-    const archived = await session.archiveMarkdown({
-      fileId: created.fileId,
-      expectedRevision: updated.revision,
-    });
-    expect(archived).toMatchObject({
-      fileId: created.fileId,
-      relativePath: "archive/new.md",
-      revision: revision("3"),
-    });
+    expect(updated.revision).toBe(revision("fake-revision-000001"));
+    await expectCode(
+      () =>
+        session.archiveMarkdown({
+          fileId: created.fileId,
+          expectedRevision: updated.revision,
+        }),
+      "UNSUPPORTED",
+    );
     expect(drive.inspect(created.fileId)).toMatchObject({
-      parentIds: [folderId("archive")],
+      parentIds: [folderId("root")],
       content: "new",
     });
   });
 
-  it("does not mutate fake state when an update or archive revision is stale", async () => {
+  it("does not mutate fake state when an update is stale or archive is disabled", async () => {
     const { drive, session } = fixture();
-    const before = drive.inspect("guide");
+    const before = drive.inspect("root-file");
     await expectCode(
       () =>
         session.updateMarkdown({
-          path: "docs/guide.md",
+          path: "root-file.md",
           expectedRevision: revision("0"),
           content: "unsafe",
         }),
@@ -203,12 +221,79 @@ describe("MarkdownService", () => {
     await expectCode(
       () =>
         session.archiveMarkdown({
-          path: "docs/guide.md",
+          path: "root-file.md",
           expectedRevision: revision("0"),
+        }),
+      "UNSUPPORTED",
+    );
+    expect(drive.inspect("root-file")).toEqual(before);
+  });
+
+  it("keeps two-actor stale content and stale source-parent mutations unchanged", async () => {
+    const { drive, session } = fixture();
+    const original = drive.inspect("root-file");
+    if (!original?.revision) throw new Error("fixture revision is required");
+    const originalRevision = original.revision;
+
+    const actorBContent = await drive.updateFile(
+      fileId("root-file"),
+      originalRevision,
+      "actor-b-content",
+    );
+    expect(actorBContent).toMatchObject({ outcome: "success" });
+    const afterContent = drive.inspect("root-file");
+    await expectCode(
+      () =>
+        session.updateMarkdown({
+          fileId: fileId("root-file"),
+          expectedRevision: originalRevision,
+          content: "actor-a-content",
         }),
       "CONFLICT",
     );
-    expect(drive.inspect("guide")).toEqual(before);
+    expect(drive.inspect("root-file")).toEqual(afterContent);
+
+    const fresh = drive.inspect("root-file");
+    if (!fresh?.revision) throw new Error("fixture revision is required");
+    const actorBMove = await drive.moveFile(
+      fileId("root-file"),
+      fresh.revision,
+      folderId("root"),
+      folderId("docs"),
+    );
+    expect(actorBMove).toMatchObject({ outcome: "success" });
+    if (actorBMove.outcome !== "success")
+      throw new Error("actor B move failed");
+    const afterMove = drive.inspect("root-file");
+    await expect(
+      drive.moveFile(
+        fileId("root-file"),
+        actorBMove.node.revision as ReturnType<typeof revision>,
+        folderId("root"),
+        folderId("archive"),
+      ),
+    ).resolves.toMatchObject({ outcome: "conflict" });
+    expect(drive.inspect("root-file")).toEqual(afterMove);
+  });
+
+  it("does not dispatch nested mutations after a non-atomic ancestor resolution", async () => {
+    const { service } = fixture();
+    await expectCode(
+      () =>
+        service
+          .openWriteSession(testLease)
+          .createMarkdown({ path: "docs/new.md", content: "x" }),
+      "UNSUPPORTED",
+    );
+    await expectCode(
+      () =>
+        service.openWriteSession(testLease).updateMarkdown({
+          path: "docs/guide.md",
+          expectedRevision: revision("1"),
+          content: "x",
+        }),
+      "UNSUPPORTED",
+    );
   });
 
   it("rejects unsafe local inputs before any port call", async () => {
@@ -335,10 +420,10 @@ describe("MarkdownService", () => {
     await expectCode(
       () =>
         invalidArchive.archiveMarkdown({
-          path: "docs/guide.md",
+          path: "root-file.md",
           expectedRevision: revision("1"),
         }),
-      "OUTSIDE_ROOT",
+      "UNSUPPORTED",
     );
   });
 
@@ -409,6 +494,39 @@ describe("MarkdownService", () => {
         (entry) => entry.relativePath,
       ),
     ).toEqual(["docs/guide.md"]);
+  });
+
+  it("rejects an unsafe provider-selected root name before an ID mutation", async () => {
+    const drive = new InMemoryDrivePort();
+    drive.addFixture({ id: "root", name: "C:root", kind: "folder" });
+    drive.addFixture({
+      id: "archive",
+      name: "archive",
+      kind: "folder",
+      parentIds: ["root"],
+    });
+    drive.addFixture({
+      id: "file",
+      name: "file.md",
+      kind: "file",
+      parentIds: ["root"],
+      content: "old",
+    });
+    const session = new MarkdownService(
+      drive,
+      { rootFolderId: folderId("root"), archiveFolderId: folderId("archive") },
+      writerFrom(drive),
+    ).openWriteSession(testLease);
+    await expectCode(
+      () =>
+        session.updateMarkdown({
+          fileId: fileId("file"),
+          expectedRevision: revision("1"),
+          content: "new",
+        }),
+      "UNSUPPORTED",
+    );
+    expect(drive.inspect("file")?.content).toBe("old");
   });
 
   it("validates service configuration", () => {
@@ -549,22 +667,21 @@ describe("MarkdownService", () => {
 
   it("rejects inconsistent create/update success and an occupied archive destination", async () => {
     const { drive } = fixture();
-    const guide = drive.inspect("guide") as DriveNode;
+    const rootFile = drive.inspect("root-file") as DriveNode;
     const createService = new MarkdownService(
       portFrom(drive),
       { rootFolderId: folderId("root"), archiveFolderId: folderId("archive") },
       writerFrom({
         createFile: async () => ({
           outcome: "success",
-          node: { ...guide, name: "wrong.md" },
+          node: { ...rootFile, name: "wrong.md" },
         }),
         updateFile: drive.updateFile.bind(drive),
         moveFile: drive.moveFile.bind(drive),
       }),
     ).openWriteSession(testLease);
     await expectCode(
-      () =>
-        createService.createMarkdown({ path: "docs/new.md", content: "new" }),
+      () => createService.createMarkdown({ path: "new.md", content: "new" }),
       "UNSUPPORTED",
     );
 
@@ -575,7 +692,11 @@ describe("MarkdownService", () => {
         createFile: drive.createFile.bind(drive),
         updateFile: async () => ({
           outcome: "success" as const,
-          node: { ...guide, revision: revision("2"), size: 999 },
+          node: {
+            ...rootFile,
+            revision: revision("fake-revision-000001"),
+            size: 999,
+          },
         }),
         moveFile: drive.moveFile.bind(drive),
       }),
@@ -583,7 +704,7 @@ describe("MarkdownService", () => {
     await expectCode(
       () =>
         updateService.updateMarkdown({
-          path: "docs/guide.md",
+          path: "root-file.md",
           expectedRevision: revision("1"),
           content: "new",
         }),
@@ -599,9 +720,10 @@ describe("MarkdownService", () => {
         moveFile: async () => ({
           outcome: "success" as const,
           node: {
-            ...guide,
+            ...rootFile,
+            name: "wrong.md",
             parentIds: [folderId("archive")],
-            revision: revision("1"),
+            revision: revision("fake-revision-000001"),
           },
         }),
       }),
@@ -609,7 +731,7 @@ describe("MarkdownService", () => {
     await expectCode(
       () =>
         archiveResponseService.archiveMarkdown({
-          path: "docs/guide.md",
+          path: "root-file.md",
           expectedRevision: revision("1"),
         }),
       "UNSUPPORTED",
@@ -617,7 +739,7 @@ describe("MarkdownService", () => {
 
     drive.addFixture({
       id: "archive-guide",
-      name: "guide.md",
+      name: "root-file.md",
       kind: "file",
       parentIds: ["archive"],
       content: "old",
@@ -630,10 +752,10 @@ describe("MarkdownService", () => {
     await expectCode(
       () =>
         archiveService.archiveMarkdown({
-          path: "docs/guide.md",
+          path: "root-file.md",
           expectedRevision: revision("1"),
         }),
-      "INVALID_ARCHIVE",
+      "UNSUPPORTED",
     );
   });
 

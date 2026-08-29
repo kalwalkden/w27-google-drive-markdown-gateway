@@ -29,6 +29,7 @@ describe("Markdown domain validation", () => {
     "a//file.md",
     "a/../file.md",
     "a/./file.md",
+    "a/C:drive-qualified.md",
     "a/",
     "a/\u0000.md",
     "C:\\docs\\file.md",
@@ -48,4 +49,14 @@ describe("Markdown domain validation", () => {
       MarkdownGatewayError,
     );
   });
+
+  it.each(["\ud800", "\udc00", "before\ud800after"])(
+    "rejects unpaired UTF-16 surrogates before size measurement",
+    (content) => {
+      expect(() => utf8ByteSize(content)).toThrow(MarkdownGatewayError);
+      expect(() => requireContentWithinLimit(content, 1_000)).toThrow(
+        MarkdownGatewayError,
+      );
+    },
+  );
 });

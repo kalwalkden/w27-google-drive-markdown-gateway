@@ -299,6 +299,18 @@ describe("GoogleDriveReadAdapter", () => {
     });
   });
 
+  it("rejects metadata whose returned opaque ID differs from the requested ID", async () => {
+    const api = new FakeDriveApi();
+    api.resources.set("root", folder("root", "root"));
+    api.resources.set("requested", file("returned", "read.md", ["root"], "x"));
+    await expect(
+      adapter(api).getNode(fileId("requested")),
+    ).rejects.toMatchObject({
+      failure: "malformed",
+      operation: "get-metadata",
+    });
+  });
+
   it.each([
     [() => Number.NaN],
     [() => Number.POSITIVE_INFINITY],

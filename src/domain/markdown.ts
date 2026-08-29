@@ -100,7 +100,36 @@ export function isMarkdownName(name: string): boolean {
 }
 
 export function utf8ByteSize(content: string): number {
+  assertWellFormedUtf16(content);
   return new TextEncoder().encode(content).byteLength;
+}
+
+/** JavaScript strings may contain lone UTF-16 surrogates, which are not valid text. */
+export function assertWellFormedUtf16(value: string): void {
+  if (typeof value !== "string") {
+    throw new MarkdownGatewayError(
+      "INVALID_CONTENT",
+      "Markdown content must be UTF-8 text.",
+    );
+  }
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const following = value.charCodeAt(index + 1);
+      if (!(following >= 0xdc00 && following <= 0xdfff)) {
+        throw new MarkdownGatewayError(
+          "INVALID_CONTENT",
+          "Markdown content contains an unpaired UTF-16 surrogate.",
+        );
+      }
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      throw new MarkdownGatewayError(
+        "INVALID_CONTENT",
+        "Markdown content contains an unpaired UTF-16 surrogate.",
+      );
+    }
+  }
 }
 
 /** Converts a caller path to a canonical Drive-name segment sequence. */
@@ -135,10 +164,15 @@ export function parseRelativePath(path: string): readonly string[] {
   }
 
   const segments = normalized.split("/");
-  if (segments.some((segment) => segment === "." || segment === "..")) {
+  if (
+    segments.some(
+      (segment) =>
+        segment === "." || segment === ".." || /^[a-zA-Z]:/u.test(segment),
+    )
+  ) {
     throw new MarkdownGatewayError(
       "INVALID_PATH",
-      "Path traversal is not allowed.",
+      "Path contains an unsafe segment.",
     );
   }
   return segments;
@@ -164,12 +198,7 @@ export function requireContentWithinLimit(
   content: string,
   maxBytes: number,
 ): void {
-  if (typeof content !== "string") {
-    throw new MarkdownGatewayError(
-      "INVALID_CONTENT",
-      "Markdown content must be UTF-8 text.",
-    );
-  }
+  assertWellFormedUtf16(content);
   const size = utf8ByteSize(content);
   if (size > maxBytes) {
     throw new MarkdownGatewayError(
