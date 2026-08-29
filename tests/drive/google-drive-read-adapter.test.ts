@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { MarkdownService } from "../../src/application/markdown-service.js";
 import { fileId, folderId, revision } from "../../src/domain/markdown.js";
 import type { GoogleDriveApi } from "../../src/drive/google-drive-auth.js";
 import {
@@ -155,7 +156,7 @@ describe("GoogleDriveReadAdapter", () => {
     expect(api.gets.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("stops Drive pages and metadata verification at a caller-provided list cap", async () => {
+  it("returns one unverified final child only for an explicit overflow sentinel", async () => {
     const api = new FakeDriveApi();
     api.resources.set("root", folder("root", "root"));
     api.resources.set("one", file("one", "one.md", ["root"], "one"));
@@ -170,15 +171,120 @@ describe("GoogleDriveReadAdapter", () => {
     ]);
 
     await expect(
-      adapter(api).listChildren(folderId("root"), { limit: 2 }),
-    ).resolves.toMatchObject([{ id: fileId("one") }, { id: fileId("two") }]);
-    expect(api.lists).toHaveLength(1);
-    expect(api.lists[0]).toMatchObject({ pageSize: 2 });
+      adapter(api).listChildren(folderId("root"), {
+        limit: 3,
+        overflowSentinel: true,
+      }),
+    ).resolves.toMatchObject([
+      { id: fileId("one") },
+      { id: fileId("two") },
+      { id: fileId("three") },
+    ]);
+    expect(api.lists).toHaveLength(2);
+    expect(api.lists[0]).toMatchObject({ pageSize: 3 });
     expect(api.gets.map((request) => request.fileId)).toEqual([
       "root",
       "one",
       "two",
     ]);
+  });
+
+  it("accepts an exact complete page at the enumeration limit", async () => {
+    const api = new FakeDriveApi();
+    api.resources.set("root", folder("root", "root"));
+    api.resources.set("one", file("one", "one.md", ["root"], "one"));
+    api.resources.set("two", file("two", "two.md", ["root"], "two"));
+    api.nextPages.set("root", [
+      [
+        api.resources.get("one") as Resource,
+        api.resources.get("two") as Resource,
+      ],
+    ]);
+
+    await expect(
+      adapter(api).listChildren(folderId("root"), { limit: 2 }),
+    ).resolves.toMatchObject([{ id: fileId("one") }, { id: fileId("two") }]);
+    expect(api.lists).toHaveLength(1);
+  });
+
+  it("rejects a list overflow before metadata or output exposure", async () => {
+    const api = new FakeDriveApi();
+    api.resources.set("root", folder("root", "root"));
+    api.resources.set("one", file("one", "one.md", ["root"], "one"));
+    api.resources.set("two", file("two", "two.md", ["root"], "two"));
+    api.nextPages.set("root", [
+      [api.resources.get("one") as Resource],
+      [api.resources.get("two") as Resource],
+    ]);
+    const service = new MarkdownService(adapter(api), {
+      rootFolderId: folderId("root"),
+      archiveFolderId: folderId("archive"),
+      maxListResults: 1,
+    });
+
+    await expect(service.listMarkdown()).rejects.toMatchObject({
+      code: "RESULT_LIMIT",
+    });
+    expect(api.lists).toHaveLength(2);
+    expect(api.gets.map((request) => request.fileId)).toEqual(["root", "one"]);
+  });
+
+  it("fails closed when the enumeration cap has a next page or an oversized page", async () => {
+    const nextPageApi = new FakeDriveApi();
+    nextPageApi.resources.set("root", folder("root", "root"));
+    nextPageApi.resources.set("one", file("one", "one.md", ["root"], "one"));
+    nextPageApi.resources.set("two", file("two", "two.md", ["root"], "two"));
+    nextPageApi.nextPages.set("root", [
+      [nextPageApi.resources.get("one") as Resource],
+      [nextPageApi.resources.get("two") as Resource],
+    ]);
+    await expect(
+      adapter(nextPageApi).listChildren(folderId("root"), { limit: 1 }),
+    ).rejects.toMatchObject({ failure: "limit", operation: "list-children" });
+    expect(nextPageApi.lists).toHaveLength(1);
+
+    const overflowApi = new FakeDriveApi();
+    overflowApi.resources.set("root", folder("root", "root"));
+    overflowApi.resources.set("one", file("one", "one.md", ["root"], "one"));
+    overflowApi.resources.set("two", file("two", "two.md", ["root"], "two"));
+    overflowApi.nextPages.set("root", [
+      [
+        overflowApi.resources.get("one") as Resource,
+        overflowApi.resources.get("two") as Resource,
+      ],
+    ]);
+    await expect(
+      adapter(overflowApi).listChildren(folderId("root"), { limit: 1 }),
+    ).rejects.toMatchObject({ failure: "limit", operation: "list-children" });
+    expect(overflowApi.gets.map((request) => request.fileId)).toEqual(["root"]);
+  });
+
+  it("never lets later-page duplicates reach path resolution, search, or create checks", async () => {
+    const api = new FakeDriveApi();
+    api.resources.set("root", folder("root", "root"));
+    api.resources.set("one", file("one", "same.md", ["root"], "one"));
+    api.resources.set("two", file("two", "same.md", ["root"], "two"));
+    api.nextPages.set("root", [
+      [api.resources.get("one") as Resource],
+      [api.resources.get("two") as Resource],
+    ]);
+    const drive = adapter(api, { maxTraversalNodes: 1 });
+    const service = new MarkdownService(drive, {
+      rootFolderId: folderId("root"),
+      archiveFolderId: folderId("archive"),
+    });
+
+    await expect(
+      service.readMarkdown({ path: "same.md" }),
+    ).rejects.toMatchObject({ failure: "limit", operation: "list-children" });
+    await expect(
+      drive.searchDirectChildren(folderId("root"), "same", 1),
+    ).rejects.toMatchObject({ failure: "limit", operation: "list-children" });
+    await expect(
+      service
+        .openWriteSession({} as never)
+        .createMarkdown({ path: "new.md", content: "new" }),
+    ).rejects.toMatchObject({ failure: "limit", operation: "list-children" });
   });
 
   it("uses the validated Shared Drive corpus and rejects a root topology mismatch", async () => {

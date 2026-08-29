@@ -110,6 +110,8 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
     if (!Number.isSafeInteger(limit) || limit < 1)
       throw new GoogleDriveProviderError("configuration", "list-children");
     const enumerationLimit = Math.min(limit, this.maxTraversalNodes);
+    const overflowSentinel =
+      options?.overflowSentinel === true && enumerationLimit === limit;
     const root = await this.ensureRoot();
     const result: DriveNode[] = [];
     let pageToken: string | undefined;
@@ -133,9 +135,15 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
       });
       pages += 1;
       const page = parseListResource(data, "list-children");
+      const remaining = enumerationLimit - result.length;
+      if (page.files.length > remaining)
+        throw new GoogleDriveProviderError("limit", "list-children");
       for (const resource of page.files) {
-        if (result.length >= enumerationLimit) break;
         const candidate = normalizeNode(resource, "list-children");
+        if (overflowSentinel && result.length === enumerationLimit - 1) {
+          result.push(candidate);
+          continue;
+        }
         if (candidate.kind !== "file") {
           result.push(candidate);
           continue;
@@ -149,7 +157,10 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
         result.push(current);
       }
       pageToken = page.nextPageToken;
-    } while (pageToken && result.length < enumerationLimit);
+      if (pageToken && result.length === enumerationLimit) {
+        throw new GoogleDriveProviderError("limit", "list-children");
+      }
+    } while (pageToken);
     return result;
   }
 

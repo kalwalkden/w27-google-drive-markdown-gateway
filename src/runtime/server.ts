@@ -115,7 +115,7 @@ export async function composeRuntime(
     maxMarkdownBytes: config.drive.maxMarkdownBytes,
     defaultSearchLimit: Math.min(20, config.http.maxResultItems),
     maxSearchLimit: config.http.maxResultItems,
-    maxListResults: config.drive.maxResults,
+    maxListResults: config.http.maxResultItems,
   });
   const app = (dependencies.createApiApp ?? createJsonApiApp)({
     config,

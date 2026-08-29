@@ -286,7 +286,7 @@ describe("MarkdownService", () => {
     expect(() => new TextEncoder().encode(emojiHit?.excerpt)).not.toThrow();
   });
 
-  it("passes the configured list cap to the port before verifying metadata", async () => {
+  it("uses one overflow sentinel, accepts an exact cap, and rejects overflow before metadata", async () => {
     class TrackingDrive extends InMemoryDrivePort {
       readonly listLimits: (number | undefined)[] = [];
       readonly metadataIds: string[] = [];
@@ -307,7 +307,7 @@ describe("MarkdownService", () => {
 
     const drive = new TrackingDrive();
     drive.addFixture({ id: "root", name: "root", kind: "folder" });
-    for (const id of ["one", "two", "three"]) {
+    for (const id of ["one", "two"]) {
       drive.addFixture({
         id,
         name: `${id}.md`,
@@ -325,15 +325,31 @@ describe("MarkdownService", () => {
     const service = new MarkdownService(drive, {
       rootFolderId: folderId("root"),
       archiveFolderId: folderId("archive"),
-      maxListResults: 2,
+      maxListResults: 3,
     });
 
     await expect(service.listMarkdown()).resolves.toMatchObject([
       { relativePath: "one.md" },
       { relativePath: "two.md" },
     ]);
-    expect(drive.listLimits).toEqual([2]);
-    expect(drive.metadataIds).not.toContain("three");
+    expect(drive.listLimits).toEqual([4]);
+
+    drive.addFixture({
+      id: "three",
+      name: "three.md",
+      kind: "file",
+      parentIds: ["root"],
+      content: "three",
+    });
+    drive.metadataIds.length = 0;
+    const overflowService = new MarkdownService(drive, {
+      rootFolderId: folderId("root"),
+      archiveFolderId: folderId("archive"),
+      maxListResults: 3,
+    });
+    await expectCode(() => overflowService.listMarkdown(), "RESULT_LIMIT");
+    expect(drive.listLimits).toEqual([4, 4]);
+    expect(drive.metadataIds).toEqual([]);
   });
 
   it("creates and conditionally updates direct-root files", async () => {

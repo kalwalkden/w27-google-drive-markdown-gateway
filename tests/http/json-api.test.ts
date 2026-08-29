@@ -536,6 +536,11 @@ describe("JSON API", () => {
         "FILE_TOO_LARGE",
       ],
       [
+        new MarkdownGatewayError("RESULT_LIMIT", "private result detail"),
+        413,
+        "RESULT_LIMIT_EXCEEDED",
+      ],
+      [
         new MarkdownGatewayError("OUTSIDE_ROOT", "root identifier"),
         404,
         "NOT_FOUND",

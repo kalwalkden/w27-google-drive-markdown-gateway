@@ -53,7 +53,7 @@ export interface MarkdownServiceConfig {
   readonly defaultRecursive?: boolean;
   readonly defaultSearchLimit?: number;
   readonly maxSearchLimit?: number;
-  /** Maximum direct-root entries enumerated for one list request. */
+  /** Maximum direct-root entries returned by one list request. */
   readonly maxListResults?: number;
 }
 
@@ -144,12 +144,19 @@ export class MarkdownService {
     }
     this.requireDirectRootRead(input.path, recursive);
     const candidates = await this.port.listChildren(this.config.rootFolderId, {
-      limit: this.maxListResults,
+      limit: this.maxListResults + 1,
+      overflowSentinel: true,
     });
+    if (candidates.length > this.maxListResults) {
+      throw new MarkdownGatewayError(
+        "RESULT_LIMIT",
+        "Markdown list exceeds the configured result limit.",
+        { maxResults: this.maxListResults },
+      );
+    }
     const result: MarkdownFileMetadata[] = [];
     const paths = new Set<string>();
     for (const candidate of candidates) {
-      if (result.length >= this.maxListResults) break;
       const metadata = await this.safeMetadata(candidate);
       if (metadata && this.isDirectlyBelow(metadata.relativePath, [])) {
         this.assertUniquePath(paths, metadata.relativePath);

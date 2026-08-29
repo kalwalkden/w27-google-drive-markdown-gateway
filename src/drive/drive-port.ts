@@ -23,17 +23,23 @@ export interface DriveSearchHit {
   readonly excerpt?: string;
 }
 
-/** A hard upper bound for a single child enumeration. */
+/** A hard bound for a single child enumeration. */
 export interface DriveListOptions {
   readonly limit: number;
+  /**
+   * Requests one unverified final child solely as an overflow sentinel. A
+   * caller that sets this must reject a result whose length reaches `limit`
+   * before inspecting or exposing any returned child.
+   */
+  readonly overflowSentinel?: boolean;
 }
 
 /** Facts used by MarkdownService to resolve and verify documents. */
 export interface DriveReadPort {
   getNode(id: FileId | FolderId): Promise<DriveNode | undefined>;
   /**
-   * Returns no more than `options.limit` children when a bound is supplied.
-   * Providers must stop enumeration and metadata verification at that bound.
+   * Providers fail closed if the bound would omit a child. The optional
+   * overflow sentinel is the only exception and must never be consumed.
    */
   listChildren(
     folderId: FolderId,

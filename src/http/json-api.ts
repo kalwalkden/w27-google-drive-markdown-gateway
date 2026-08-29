@@ -92,6 +92,7 @@ interface PublicFailure {
     | "INVALID_CONTENT"
     | "INVALID_ARCHIVE"
     | "FILE_TOO_LARGE"
+    | "RESULT_LIMIT"
     | "NOT_FOUND"
     | "AMBIGUOUS_PATH"
     | "CONFLICT"
@@ -246,6 +247,13 @@ function publicFailure(error: unknown): PublicFailure {
           error.code,
           "Markdown content exceeds the configured limit.",
           "file_too_large",
+        );
+      case "RESULT_LIMIT":
+        return failure(
+          413,
+          "RESULT_LIMIT_EXCEEDED",
+          "Result exceeds the configured response limit.",
+          "result_limit_exceeded",
         );
       case "NOT_FOUND":
       case "OUTSIDE_ROOT":

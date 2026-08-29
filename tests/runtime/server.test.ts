@@ -103,6 +103,48 @@ describe("runtime composition", () => {
     expect(writeSessionProvider).toBeUndefined();
   });
 
+  it("uses the smaller HTTP result cap for service list enumeration", async () => {
+    const parsed = JSON.parse(config("shared-drive-adc")) as {
+      http: { maxResultItems: number };
+    };
+    parsed.http.maxResultItems = 2;
+    const listOptions: unknown[] = [];
+    let service: { listMarkdown(): Promise<unknown> } | undefined;
+
+    await composeRuntime(JSON.stringify(parsed), {
+      ...runtimeDependencies([]),
+      createReadAdapter: () => ({
+        async getNode() {
+          return undefined;
+        },
+        async listChildren(_folder, options) {
+          listOptions.push(options);
+          return [];
+        },
+        async listDescendants() {
+          return [];
+        },
+        async searchDirectChildren() {
+          return [];
+        },
+        async searchDescendants() {
+          return [];
+        },
+        async readFile() {
+          return undefined;
+        },
+      }),
+      createApiApp: (dependencies) => {
+        service = dependencies.service;
+        return { get() {} } as never;
+      },
+    });
+
+    if (!service) throw new Error("runtime did not compose a service");
+    await expect(service.listMarkdown()).resolves.toEqual([]);
+    expect(listOptions).toEqual([{ limit: 3, overflowSentinel: true }]);
+  });
+
   it("loads a bounded OAuth file only for My Drive before composing its adapter", async () => {
     const calls: string[] = [];
     await composeRuntime(config("my-drive-refresh-token"), {

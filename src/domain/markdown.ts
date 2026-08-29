@@ -14,6 +14,7 @@ export type ErrorCode =
   | "NOT_MARKDOWN"
   | "INVALID_CONTENT"
   | "FILE_TOO_LARGE"
+  | "RESULT_LIMIT"
   | "CONFLICT"
   | "INVALID_ARCHIVE"
   | "UNSUPPORTED";
