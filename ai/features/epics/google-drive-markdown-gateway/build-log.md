@@ -308,3 +308,14 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
   contract. Docker and Terraform executables remain operator-only validation gates.
 - Validation: full combined `CI=true pnpm check` passed with 191 tests.
 - Status: complete; grouped-epic archival checklist update follows
+
+## 2026-08-29 — Codex CLI executable and file-safety repair
+
+- Independent task review found the published bin lacked a Node shebang and a single descriptor
+  read could legally return a truncated prefix. The built bin is now directly executable, and
+  no-follow descriptor reads loop to the verified size, reject short reads/growth, and probe EOF.
+- Added mounted-secret, symlink/nonregular/size/UTF-8, redirect, timeout, oversized-response,
+  built-bin, and exactly-once write failure coverage.
+- Validation: full combined `CI=true pnpm check` passed with 197 tests; the built bin reports the
+  expected version. No live endpoint, credential, Drive, or external network call ran.
+- Status: repaired; independent task re-review pending

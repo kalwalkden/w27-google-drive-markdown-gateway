@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { isAbsolute } from "node:path";
@@ -317,14 +318,29 @@ async function readOpenedFile(
   path: string,
   limit: number,
 ): Promise<Uint8Array> {
-  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const noFollow = constants.O_NOFOLLOW;
+  if (typeof noFollow !== "number" || noFollow === 0)
+    throw new Error("no-follow-unavailable");
+  const handle = await open(path, constants.O_RDONLY | noFollow);
   try {
     const info = await handle.stat();
     if (!info.isFile() || info.size > limit) throw new Error("unsafe-file");
-    const bytes = Buffer.allocUnsafe(limit + 1);
-    const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
-    if (bytesRead > limit) throw new Error("oversized-file");
-    return bytes.subarray(0, bytesRead);
+    const bytes = Buffer.allocUnsafe(info.size);
+    let offset = 0;
+    while (offset < bytes.byteLength) {
+      const { bytesRead } = await handle.read(
+        bytes,
+        offset,
+        bytes.byteLength - offset,
+        offset,
+      );
+      if (bytesRead === 0) throw new Error("unexpected-truncation");
+      offset += bytesRead;
+    }
+    const extra = Buffer.allocUnsafe(1);
+    if ((await handle.read(extra, 0, 1, bytes.byteLength)).bytesRead !== 0)
+      throw new Error("file-grew");
+    return bytes;
   } finally {
     await handle.close();
   }
