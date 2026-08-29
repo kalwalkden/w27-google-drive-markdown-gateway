@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open, readFile } from "node:fs/promises";
-import { relative, resolve } from "node:path";
+import { link, lstat, open, realpath, unlink } from "node:fs/promises";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -16,10 +17,7 @@ const maximumOutputBytes = 1_048_576;
 
 export function isOutsideRepository(path: string, root: string): boolean {
   const value = relative(root, path);
-  return (
-    value === ".." ||
-    value.startsWith(`..${process.platform === "win32" ? "\\\\" : "/"}`)
-  );
+  return value === ".." || value.startsWith(`..${sep}`);
 }
 
 export function parseHarnessArgs(args: readonly string[]): {
@@ -49,15 +47,85 @@ export function parseHarnessArgs(args: readonly string[]): {
   };
 }
 
-async function externalRegularFile(
+export async function externalRegularFile(
   path: string,
   root: string,
 ): Promise<string> {
-  const resolved = resolve(path);
-  if (!isOutsideRepository(resolved, root)) throw new Error("repository-path");
-  const stat = await lstat(resolved);
+  const requested = resolve(path);
+  const stat = await lstat(requested);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("unsafe-file");
-  return resolved;
+  const [physical, physicalRoot] = await Promise.all([
+    realpath(requested),
+    realpath(root),
+  ]);
+  if (!isOutsideRepository(physical, physicalRoot))
+    throw new Error("repository-path");
+  return physical;
+}
+
+async function readExternalConfig(path: string): Promise<unknown> {
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.size > maximumOutputBytes)
+      throw new Error("unsafe-file");
+    return JSON.parse(await handle.readFile("utf8"));
+  } finally {
+    await handle.close();
+  }
+}
+
+export async function publishExternalEvidence(
+  requestedPath: string,
+  root: string,
+  value: string,
+): Promise<string> {
+  const requested = resolve(requestedPath);
+  const name = basename(requested);
+  if (name === "." || name === "..") throw new Error("unsafe-file");
+  const [physicalParent, physicalRoot] = await Promise.all([
+    realpath(dirname(requested)),
+    realpath(root),
+  ]);
+  if (!isOutsideRepository(physicalParent, physicalRoot))
+    throw new Error("repository-path");
+  const destination = join(physicalParent, name);
+  try {
+    await lstat(destination);
+    throw new Error("output-exists");
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      !("code" in error) ||
+      error.code !== "ENOENT"
+    )
+      throw error;
+  }
+  const temporary = join(physicalParent, `.${name}.${randomUUID()}.tmp`);
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(
+      temporary,
+      constants.O_WRONLY |
+        constants.O_CREAT |
+        constants.O_EXCL |
+        constants.O_NOFOLLOW,
+      0o600,
+    );
+    await handle.writeFile(value, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    // A hard-link publish is atomic and fails rather than replacing an
+    // existing destination. The temporary file is already complete and synced.
+    await link(temporary, destination);
+    await unlink(temporary);
+    return destination;
+  } catch (error) {
+    await handle?.close().catch(() => undefined);
+    await unlink(temporary).catch(() => undefined);
+    throw error;
+  }
 }
 
 function mdDriveRunner(): CommandRunner {
@@ -103,27 +171,16 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     const parsed = parseHarnessArgs(args);
     const root = resolve(".");
     const configPath = await externalRegularFile(parsed.configPath, root);
-    const outputPath = resolve(parsed.outputPath);
-    if (!isOutsideRepository(outputPath, root))
-      throw new Error("repository-path");
-    const config = JSON.parse(await readFile(configPath, "utf8"));
-    const output = await open(
-      outputPath,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
-      0o600,
+    const config = await readExternalConfig(configPath);
+    const evidence = assertSanitizedEvidence(
+      await runHarness(config, confirmation, mdDriveRunner()),
     );
-    try {
-      const evidence = assertSanitizedEvidence(
-        await runHarness(config, confirmation, mdDriveRunner()),
-      );
-      await output.writeFile(`${JSON.stringify(evidence)}\n`, "utf8");
-      return evidence.staleConflict === "passed" &&
-        evidence.cleanup === "passed"
-        ? 0
-        : 12;
-    } finally {
-      await output.close();
-    }
+    await publishExternalEvidence(
+      parsed.outputPath,
+      root,
+      `${JSON.stringify(evidence)}\n`,
+    );
+    return evidence.overall === "passed" ? 0 : 12;
   } catch {
     process.stderr.write("codex-cloud harness: BLOCKED\n");
     return 2;

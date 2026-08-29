@@ -264,7 +264,10 @@ function endpoint(value: string | undefined, allowInsecure: boolean): URL {
     url.hash
   )
     fail("USAGE");
-  url.pathname = url.pathname.replace(/\/$/u, "");
+  // Collapse separator runs before route construction. A pathname beginning
+  // with `//` must never be passed back through URL resolution because it is
+  // interpreted as a protocol-relative authority.
+  url.pathname = url.pathname.replace(/\/{2,}/gu, "/").replace(/\/+$/u, "");
   return url;
 }
 
@@ -355,11 +358,12 @@ function request(
   readonly init: RequestInit;
   readonly operation: string;
 } {
-  const path = (suffix: string) =>
-    new URL(
-      `${base.pathname}/v1/markdown/${suffix}`.replace(/^\/\//u, "/"),
-      base,
-    );
+  const path = (suffix: string) => {
+    const route = new URL(base.href);
+    const prefix = base.pathname === "/" ? "" : base.pathname;
+    route.pathname = `${prefix}/v1/markdown/${suffix}`;
+    return route;
+  };
   if (command.kind === "list") {
     const url = path("list");
     if (command.path) url.searchParams.set("path", command.path);

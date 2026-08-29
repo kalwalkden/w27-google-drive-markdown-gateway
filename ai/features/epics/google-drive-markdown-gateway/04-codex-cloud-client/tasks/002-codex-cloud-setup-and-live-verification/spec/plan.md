@@ -4,7 +4,7 @@
 
 Add project-scoped Codex cloud setup and usage guidance plus an explicit, operator-run clean-environment verification harness for the completed `md-drive` CLI and deployed JSON gateway. The task records configuration instructions, a narrow egress policy, safe secret injection, an agent workflow skill, a sanitized release-evidence format, and routine fake/static tests.
 
-The harness is release evidence, not an application capability or write-authority mechanism. It verifies the six existing gateway operations and a deliberately stale update only in an operator-configured disposable Markdown area. It must clean up by archiving only the exact files it created. A successful run does not bypass the Drive write gate, provision a write lease, or enable a disabled deployment.
+The harness is release evidence, not an application capability or write-authority mechanism. The current gateway is direct-root-only, production writes are disabled, and archive is unavailable, so the shipped harness must emit a truthful blocked record without a gateway call. The six-operation and stale-update state machine remains fake-testable for a future separately reviewed capability change, but is not reachable from the production harness entry point. A successful future run must not bypass the Drive write gate, provision a write lease, or enable a disabled deployment.
 
 ## Binding decisions and constraints
 
@@ -65,18 +65,20 @@ The harness has no default execution. Require a closed invocation including a `r
 
 The external non-secret config may identify only bounded harness controls: the checked-in CLI executable invocation, a dedicated relative validation folder, an existing archive folder, fixed timeout bounds, and an externally supplied release/environment identifier. It must not contain endpoint URLs, bearer values/paths, Google settings, Drive IDs, revision values, document content, or unbounded command strings. Resolve the CLI to the checked-in built executable/package entry, invoke it without a shell, and inherit only the narrow environment needed for the already-injected CLI settings. Redact its process environment and never serialize raw command arguments, stdout, stderr, or thrown errors.
 
-Harness sequence:
+The production entry point records timestamps, the operator-observed platform-control states, and the current `direct-root-only` / `writes disabled` / `archive disabled` capability profile, then exits blocked before spawning `md-drive`. Platform verification alone cannot unlock the mutation sequence. Enabling it requires a new reviewed capability and evidence-contract change; configuration values cannot override this source gate.
+
+Future harness sequence (fake-test seam only in the current tree):
 
 1. Preflight CLI availability and configuration without printing values. Use `md-drive list` on the dedicated validation folder and confirm the archive folder is separately accessible. A failure means no create.
 2. Generate a UUID run ID, a unique `w27-codex-cloud-validation-<run-id>.md` relative path under that folder, and small UTF-8 marker variants entirely in memory. Use temporary local content files outside the repository with restrictive permissions; delete those temporary files in `finally` without recording their names or bodies.
 3. Exercise `list`, `search`, and `read` using the configured validation area. Treat expected empty results as valid before the test file exists; validate only CLI-owned stable JSON fields/statuses needed for state progression.
 4. Create the unique file, retain its returned opaque locator/revision only in memory, read it again, and update it once with that revision. Verify the returned revision changes by subsequently reading the same file.
 5. Issue a deliberately stale `update` using the earlier revision and a distinct marker. Require the CLI's validated `CONFLICT` result/exit behavior. Reread and verify that the current revision/content state is still the fresh update, proving the client did not silently retry or overwrite. Do not treat a timeout or ambiguous transport error as conflict proof.
-6. Exercise archive using the current reread revision. In `finally`, attempt archive only for the exact captured generated file and only when it is not already verified in the archive. Never search by a broad name, archive a pre-existing file, delete, trash, or retry an uncertain write. If cleanup cannot be verified, record cleanup failure and tell the operator to find only the generated run file in the dedicated folder and archive it manually.
+6. Exercise archive using the current reread revision. In `finally`, attempt archive only for the exact captured generated file and only when it is not already verified in the archive. Archive success is conclusive only when its returned opaque identity matches the created file and its returned location matches the exact generated archive destination; otherwise cleanup remains inconclusive. Never search by a broad name, archive a pre-existing file, delete, trash, or retry an uncertain write. If create transport is uncertain, preserve only an opaque run reference and a fixed manual-cleanup direction—never a path, file ID, revision, content, or raw diagnostic.
 
 Because list/search/read/create/update/archive are all exercised in the clean environment, an `UNSUPPORTED` result for a write is a valid finding but not a pass. It requires correcting the separately controlled deployment/write-proof state; the harness must never attempt to enable it.
 
-Write evidence with exclusive/atomic output and restrictive permissions outside the repository. Base the schema on the existing sanitized client-validation record, but add only allowlisted Codex harness data: schema/harness version, timestamps, opaque run identifier, release digest, environment identifier, gateway-hostname identifier (a one-way operator-provided identifier rather than hostname), allowed methods `["GET", "POST"]`, platform-control check states, per-operation pass/fail/allowlisted result code, stale-conflict result, cleanup result, and redaction assertions. Exclude file paths/names, user content/digests, bearer/secret values or references, URLs, IPs, Drive IDs, revisions, operation IDs, raw responses, exception text, and platform screenshots. The operator retains the evidence outside Git.
+Write evidence with exclusive/atomic output and restrictive permissions outside the repository. Resolve the physical repository and physical config/output ancestry, reject symlink ancestry that resolves inside the repository, write a complete no-follow temporary sibling, and publish without replacement so failures leave no empty destination. Base the schema on the existing sanitized client-validation record, but add only allowlisted Codex harness data: schema/harness version, timestamps, opaque run identifier, release digest, environment identifier, gateway-hostname identifier (a one-way operator-provided identifier rather than hostname), allowed methods `["GET", "POST"]`, actual operator-observed platform-control states, current gateway capability states, per-operation pass/fail/allowlisted result code, stale-conflict result, cleanup result, and redaction assertions. Exclude file paths/names, user content/digests, bearer/secret values or references, URLs, IPs, Drive IDs, revisions, operation IDs, raw responses, exception text, and platform screenshots. The operator retains the evidence outside Git.
 
 ### 4. Make routine checks fake/static only
 
@@ -92,10 +94,9 @@ Add static/documentation tests only where the repository's existing test style s
 operator config + already-injected Codex secret + narrow egress policy
   -> clean Codex cloud environment
   -> checked-in project skill / md-drive CLI
-  -> exactly one configured HTTPS gateway hostname (GET, POST only)
-  -> six gateway operations + intentional stale-update conflict
-  -> exact generated-file archive cleanup
-  -> sanitized external release-evidence record
+  -> record current platform controls and gateway capability state
+  -> block before md-drive while topology is direct-root-only and writes/archive are disabled
+  -> atomically publish sanitized external release-evidence record
 ```
 
 - The harness never receives, validates, prints, persists, or forwards a Google credential. Google authentication remains server-side.

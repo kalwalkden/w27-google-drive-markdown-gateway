@@ -21,3 +21,7 @@ Never put a bearer, endpoint value, secret-file reference, Drive credential,
 or document content in Git, prompts, command arguments, diagnostics, or
 evidence. Do not broaden egress. The operator-only cloud harness is a release
 check and runs only when explicitly requested; normal tests remain fake/static.
+The current harness is deliberately blocked because the gateway is
+direct-root-only, production writes are disabled, and archive is unavailable.
+Do not alter that gate, enable mutations, or invent nested/archive behavior in
+order to obtain a passing record.

@@ -104,6 +104,33 @@ describe("md-drive", () => {
     expect(calls).toHaveLength(3);
   });
 
+  it("keeps repeated endpoint slashes on the validated origin", async () => {
+    const calls: Request[] = [];
+    const result = run(
+      ["list"],
+      async (input, init) => {
+        const request = new Request(input, init);
+        calls.push(request);
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            operationId: "operation",
+            data: { items: [] },
+          }),
+          { status: 200 },
+        );
+      },
+      { MD_DRIVE_GATEWAY_URL: "https://gateway.invalid///evil///" },
+    );
+
+    await expect(result.code).resolves.toBe(0);
+    expect(calls).toHaveLength(1);
+    const observed = new URL(calls[0].url);
+    expect(observed.origin).toBe("https://gateway.invalid");
+    expect(observed.pathname).toBe("/evil/v1/markdown/list");
+    expect(calls[0].headers.get("authorization")).toBe(`Bearer ${bearer}`);
+  });
+
   it("does not perform I/O for usage or credential failures and keeps failure output redacted", async () => {
     let calls = 0;
     const fetcher: typeof fetch = async () => {

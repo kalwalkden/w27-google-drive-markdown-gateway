@@ -25,6 +25,9 @@ describe("audit allowlist", () => {
     expect(auditFileId("x".repeat(513))).toBeUndefined();
     expect(auditFileId("lone-\ud800-surrogate")).toBeUndefined();
     expect(auditFileId("unsafe\nfile-id")).toBeUndefined();
+    expect(auditFileId("../SENTINEL-PROVIDER-PATH")).toBeUndefined();
+    expect(auditFileId("/var/run/secrets/SENTINEL-CREDENTIAL")).toBeUndefined();
+    expect(auditFileId("https://provider.invalid/SENTINEL-ID")).toBeUndefined();
   });
 
   it("keeps authenticated identity facts audit-only and bounded", () => {

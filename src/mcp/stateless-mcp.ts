@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
+
 import express, {
   type Express,
   type NextFunction,
@@ -14,6 +17,7 @@ import type {
 } from "../application/markdown-service.js";
 import {
   AuthenticationError,
+  type AuthenticatedPrincipal,
   type PrincipalVerifier,
 } from "../auth/principal.js";
 import type { ServiceConfig } from "../config/service-config.js";
@@ -26,11 +30,24 @@ import {
   revision,
   type SearchMarkdownResult,
 } from "../domain/markdown.js";
-import { DriveProviderError } from "../drive/provider-error.js";
+import {
+  DriveProviderError,
+  type DriveProviderFailure,
+} from "../drive/provider-error.js";
 import {
   disabledWriteSessionProvider,
   type WriteSessionProvider,
 } from "../http/json-api.js";
+import {
+  type AuditLogger,
+  auditPrincipal,
+  createPinoAuditLogger,
+  type MetricRecorder,
+  type MarkdownApiAuditResult,
+  noOpMetricRecorder,
+  recordOperationInFlight,
+  recordOperationTerminal,
+} from "../observability/audit.js";
 
 export interface StatelessMcpDependencies {
   readonly service: Pick<
@@ -40,7 +57,23 @@ export interface StatelessMcpDependencies {
   readonly config: ServiceConfig;
   readonly principalVerifier: PrincipalVerifier;
   readonly writeSessionProvider?: WriteSessionProvider;
+  readonly auditLogger?: AuditLogger;
+  readonly metricRecorder?: MetricRecorder;
+  readonly now?: () => number;
+  readonly operationId?: () => string;
 }
+
+interface McpRequestContext {
+  readonly operationId: string;
+  readonly startedAt: number;
+  principal?: AuthenticatedPrincipal;
+  completed: boolean;
+}
+
+const mcpRequestContext = Symbol("mcp-request-context");
+type RequestWithMcpContext = Request & {
+  [mcpRequestContext]?: McpRequestContext;
+};
 
 type PublicErrorCode =
   | "INVALID_REQUEST"
@@ -216,11 +249,54 @@ function archiveInputSchema() {
 }
 
 const mcpResponseEnvelopeAllowanceBytes = 512;
+const maxMcpRequestIdBytes = 256;
+
+function exceedsMcpProtocolResponseLimit(
+  body: unknown,
+  maximumBytes: number,
+): boolean {
+  if (Array.isArray(body) && body.length > 1) return true;
+  const message = Array.isArray(body) ? body[0] : body;
+  if (!message || typeof message !== "object" || !("id" in message))
+    return false;
+
+  const id = message.id;
+  if (typeof id !== "string" && typeof id !== "number") return false;
+  try {
+    return (
+      Buffer.byteLength(JSON.stringify(id), "utf8") > maxMcpRequestIdBytes ||
+      maxMcpRequestIdBytes > maximumBytes
+    );
+  } catch {
+    return true;
+  }
+}
+
+function responseLimitError(): string {
+  return JSON.stringify({
+    jsonrpc: "2.0",
+    error: {
+      code: -32600,
+      message: "Request exceeds the configured response limit.",
+    },
+    id: null,
+  });
+}
+
+function isMcpToolCall(body: unknown): boolean {
+  return (
+    !Array.isArray(body) &&
+    typeof body === "object" &&
+    body !== null &&
+    Reflect.get(body, "method") === "tools/call"
+  );
+}
 
 /**
  * The SDK serializes tool content twice: once as text and once as structured
  * content. Reserve a small, fixed amount for the JSON-RPC result envelope as
- * well, so a bounded service result cannot bypass the configured wire limit.
+ * well. Request IDs and batches are bounded before protocol dispatch, so this
+ * fixed allowance covers the remaining response framing.
  */
 function exceedsMcpResponseLimit(data: unknown, maximumBytes: number): boolean {
   try {
@@ -315,6 +391,40 @@ function publicToolError(error: unknown): PublicToolError {
   return { code: "INTERNAL", message: "Internal server error." };
 }
 
+function auditResultForToolError(error: unknown): Readonly<{
+  readonly result: MarkdownApiAuditResult;
+  readonly dependencyFailure?: DriveProviderFailure;
+}> {
+  if (error instanceof DriveProviderError) {
+    return { result: "upstream_unavailable", dependencyFailure: error.failure };
+  }
+  if (error instanceof MarkdownGatewayError) {
+    switch (error.code) {
+      case "INVALID_PATH":
+        return { result: "invalid_path" };
+      case "NOT_MARKDOWN":
+        return { result: "not_markdown" };
+      case "INVALID_CONTENT":
+      case "INVALID_ARCHIVE":
+        return { result: "invalid_content" };
+      case "FILE_TOO_LARGE":
+        return { result: "file_too_large" };
+      case "RESULT_LIMIT":
+        return { result: "result_limit_exceeded" };
+      case "NOT_FOUND":
+      case "OUTSIDE_ROOT":
+        return { result: "not_found" };
+      case "AMBIGUOUS_PATH":
+        return { result: "ambiguous_path" };
+      case "CONFLICT":
+        return { result: "conflict" };
+      case "UNSUPPORTED":
+        return { result: "unsupported" };
+    }
+  }
+  return { result: "internal" };
+}
+
 function asLocator(input: { path?: string; fileId?: string }) {
   return input.path === undefined
     ? { fileId: fileId(input.fileId ?? "") }
@@ -331,14 +441,24 @@ const readAnnotations = {
 function registerTools(
   server: McpServer,
   dependencies: StatelessMcpDependencies,
+  classifyToolOutcome: (
+    outcome: ReturnType<typeof auditResultForToolError> | undefined,
+  ) => void,
 ): void {
   const { service, config } = dependencies;
   const writeSessionProvider =
     dependencies.writeSessionProvider ?? disabledWriteSessionProvider;
   const withFailure = async (work: () => Promise<unknown>) => {
     try {
-      return toolSuccess(await work(), config.http.maxJsonResponseBytes);
+      const result = toolSuccess(
+        await work(),
+        config.http.maxJsonResponseBytes,
+      );
+      if (result.structuredContent.ok) classifyToolOutcome(undefined);
+      else classifyToolOutcome({ result: "result_limit_exceeded" });
+      return result;
     } catch (error) {
+      classifyToolOutcome(auditResultForToolError(error));
       return toolFailure(publicToolError(error));
     }
   };
@@ -349,10 +469,13 @@ function registerTools(
     try {
       session = writeSessionProvider.getWriteSession();
     } catch {
+      classifyToolOutcome({ result: "unsupported" });
       return toolFailure({ code: "UNSUPPORTED", message: publicErrorMessage });
     }
-    if (!session)
+    if (!session) {
+      classifyToolOutcome({ result: "unsupported" });
       return toolFailure({ code: "UNSUPPORTED", message: publicErrorMessage });
+    }
     return withFailure(() => work(session));
   };
 
@@ -482,13 +605,17 @@ export function createStatelessMcpApp(
   const app = express();
   app.set("strict routing", true);
   app.set("case sensitive routing", true);
+  const auditLogger = dependencies.auditLogger ?? createPinoAuditLogger();
+  const metricRecorder = dependencies.metricRecorder ?? noOpMetricRecorder;
+  const now = dependencies.now ?? (() => performance.now());
+  const operationId = dependencies.operationId ?? randomUUID;
   const parser = express.json({
     limit: dependencies.config.http.maxJsonBodyBytes,
     type: "application/json",
   });
 
   const authenticate = async (
-    request: Request,
+    request: RequestWithMcpContext,
     response: Response,
     next: NextFunction,
   ): Promise<void> => {
@@ -497,62 +624,141 @@ export function createStatelessMcpApp(
         request.get("Authorization"),
       );
       if (principal.kind !== "work-mcp") throw new AuthenticationError();
+      const context = request[mcpRequestContext];
+      if (context) context.principal = principal;
       next();
     } catch {
       response
         .set("Cache-Control", "no-store")
         .set("WWW-Authenticate", "Bearer")
         .status(401)
-        .type("application/json")
-        .send(JSON.stringify({ error: "Authentication failed." }));
+        .type("application/json");
+      complete(request, response, "unauthenticated");
+      response.send(JSON.stringify({ error: "Authentication failed." }));
     }
   };
 
-  app.all("/mcp", authenticate, parser, async (request, response) => {
-    const server = new McpServer({
-      name: "google-drive-markdown-gateway",
-      version: "0.1.0",
-    });
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: true,
-    });
-    try {
-      registerTools(server, dependencies);
-      await server.connect(transport);
-      await transport.handleRequest(request, response, request.body);
-    } catch {
-      if (!response.headersSent)
-        response
-          .set("Cache-Control", "no-store")
-          .status(500)
-          .type("application/json")
-          .send(JSON.stringify({ error: "Service is unavailable." }));
-    } finally {
-      await server.close().catch(() => undefined);
+  const enforceMcpResponseLimit = (
+    request: RequestWithMcpContext,
+    response: Response,
+    next: NextFunction,
+  ): void => {
+    if (
+      !exceedsMcpProtocolResponseLimit(
+        request.body,
+        dependencies.config.http.maxJsonResponseBytes,
+      )
+    ) {
+      next();
+      return;
     }
-  });
+    response
+      .set("Cache-Control", "no-store")
+      .status(400)
+      .type("application/json");
+    complete(request, response, "invalid_request");
+    response.send(responseLimitError());
+  };
+
+  app.all(
+    "/mcp",
+    (request: RequestWithMcpContext, _response, next): void => {
+      request[mcpRequestContext] = {
+        operationId: operationId(),
+        startedAt: now(),
+        completed: false,
+      };
+      recordOperationInFlight(metricRecorder, "mcp");
+      next();
+    },
+    authenticate,
+    parser,
+    enforceMcpResponseLimit,
+    async (request: RequestWithMcpContext, response) => {
+      const server = new McpServer({
+        name: "google-drive-markdown-gateway",
+        version: "0.1.0",
+      });
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+        enableJsonResponse: true,
+      });
+      let toolOutcome: ReturnType<typeof auditResultForToolError> | undefined =
+        isMcpToolCall(request.body) ? { result: "invalid_request" } : undefined;
+      try {
+        registerTools(server, dependencies, (outcome) => {
+          toolOutcome = outcome;
+        });
+        await server.connect(transport);
+        await transport.handleRequest(request, response, request.body);
+        complete(
+          request,
+          response,
+          toolOutcome?.result ?? "succeeded",
+          toolOutcome?.dependencyFailure,
+        );
+      } catch {
+        if (!response.headersSent) {
+          response
+            .set("Cache-Control", "no-store")
+            .status(500)
+            .type("application/json");
+          complete(request, response, "internal");
+          response.send(JSON.stringify({ error: "Service is unavailable." }));
+        } else {
+          complete(request, response, "internal");
+        }
+      } finally {
+        await server.close().catch(() => undefined);
+      }
+    },
+  );
 
   app.use(
     (
       _error: unknown,
-      _request: Request,
+      request: RequestWithMcpContext,
       response: Response,
       next: NextFunction,
     ): void => {
       if (response.headersSent) {
+        complete(request, response, "invalid_request");
         next(_error);
         return;
       }
       response
         .set("Cache-Control", "no-store")
         .status(400)
-        .type("application/json")
-        .send(JSON.stringify({ error: validationMessage }));
+        .type("application/json");
+      complete(request, response, "invalid_request");
+      response.send(JSON.stringify({ error: validationMessage }));
     },
   );
 
   return app;
+
+  function complete(
+    request: RequestWithMcpContext,
+    response: Response,
+    result: MarkdownApiAuditResult,
+    dependencyFailure?: DriveProviderFailure,
+  ): void {
+    const context = request[mcpRequestContext];
+    if (!context || context.completed) return;
+    context.completed = true;
+    recordOperationTerminal(auditLogger, metricRecorder, {
+      event: "markdown-api-request",
+      operationId: context.operationId,
+      operation: "mcp",
+      principal: auditPrincipal(context.principal),
+      result,
+      statusCode: response.statusCode,
+      durationMs: Math.max(0, Math.round(now() - context.startedAt)),
+      ...(dependencyFailure === undefined
+        ? {}
+        : { dependency: "drive" as const, dependencyFailure }),
+    });
+  }
 }
 
 export type { MarkdownDocument, MarkdownFileMetadata, SearchMarkdownResult };

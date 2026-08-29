@@ -2,7 +2,7 @@
 
 This contract is an allowlist. Telemetry describes a bounded gateway operation; it must never copy a document, locator, credential, request, response, provider payload, or exception.
 
-Each externally reachable Markdown route with a route context emits at most one terminal audit event. `/healthz` is neither audited nor instrumented by the application. Audit and metric recorder failures are isolated from the already-classified HTTP response. Recorder construction is a dependency-free composition seam; the default recorder is a no-op. This contract deliberately chooses no exporter, sink, dashboard, retention policy, or alert threshold.
+Each externally reachable Markdown route with a route context emits at most one terminal audit event, including Work MCP authentication and protocol requests. `/healthz` is neither audited nor instrumented by the application. Audit and metric recorder failures are isolated from the already-classified HTTP response. Recorder construction is a dependency-free composition seam; the default recorder is a no-op. This contract deliberately chooses no exporter, sink, dashboard, retention policy, or alert threshold.
 
 ## Audit event
 
@@ -12,12 +12,12 @@ Each externally reachable Markdown route with a route context emits at most one 
 | --- | --- | --- |
 | `event` | literal `markdown-api-request` | Schema discriminator. |
 | `operationId` | server-generated UUID-like value | Audit-only correlation; never client input or a metric label. |
-| `operation` | `MarkdownApiOperation` | Closed six-operation vocabulary. |
+| `operation` | `MarkdownApiOperation` | Closed vocabulary: `mcp` for Work MCP transport requests and the six Markdown operations for JSON API requests. |
 | `principal.kind` | `work-mcp`, `codex`, `unauthenticated` | Closed enum. |
 | `principal.subject`, `principal.issuer` | bounded, normalized authenticated facts | Audit-only; absent after failed authentication and never metrics. |
 | `result` | `MarkdownApiAuditResult` | Stable terminal category. |
 | `statusCode`, `durationMs` | finite HTTP integer and non-negative rounded integer | Response classification and duration only. |
-| `fileId` | optional bounded, control-free opaque identifier | Audit-only for a safely known read/write target; never a failure-derived value or metric label. |
+| `fileId` | optional canonical opaque identifier (`[A-Za-z0-9_-]{1,256}`) | Audit-only for a safely known read/write target; never a failure-derived value or metric label. |
 | `dependency`, `dependencyFailure` | optional `drive` and `DriveProviderFailure` | Closed failure categories only; never provider payload, status, or message. |
 | `resultCount` | bounded integer for successful list/search | No individual result identity. |
 

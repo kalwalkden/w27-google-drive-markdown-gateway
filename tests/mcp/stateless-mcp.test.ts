@@ -22,6 +22,10 @@ import {
   createStatelessMcpApp,
   type StatelessMcpDependencies,
 } from "../../src/mcp/stateless-mcp.js";
+import type {
+  MarkdownApiAuditEvent,
+  MarkdownMetricObservation,
+} from "../../src/observability/audit.js";
 
 const metadata = {
   relativePath: "guide.md",
@@ -110,6 +114,7 @@ async function start(
     config: config(),
     service: fakeService(calls),
     principalVerifier: verifier(verificationCalls),
+    auditLogger: { info() {} },
     ...overrides,
   };
   const app = createStatelessMcpApp(dependencies);
@@ -142,7 +147,226 @@ function structured(result: Awaited<ReturnType<Client["callTool"]>>) {
   return result.structuredContent;
 }
 
+async function rawMcpResponse(
+  endpoint: string,
+  body: unknown,
+): Promise<{ readonly response: Response; readonly text: string }> {
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer work",
+      Accept: "application/json, text/event-stream",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  return { response, text: await response.text() };
+}
+
 describe("stateless MCP adapter", () => {
+  it("emits exactly one terminal telemetry set for a successful tool call", async () => {
+    const events: MarkdownApiAuditEvent[] = [];
+    const metrics: MarkdownMetricObservation[] = [];
+    const fixture = await start({
+      auditLogger: { info: (event) => events.push(event) },
+      metricRecorder: { record: (observation) => metrics.push(observation) },
+      operationId: () => "mcp-success-operation",
+    });
+    try {
+      const result = await rawMcpResponse(fixture.endpoint, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: "read_markdown",
+          arguments: { fileId: "SENTINEL-MCP-FILE-ID" },
+        },
+      });
+      expect(result.response.status).toBe(200);
+      expect(events).toEqual([
+        expect.objectContaining({
+          event: "markdown-api-request",
+          operationId: "mcp-success-operation",
+          operation: "mcp",
+          result: "succeeded",
+          statusCode: 200,
+        }),
+      ]);
+      expect(metrics).toEqual([
+        { metric: "gateway_http_in_flight", operation: "mcp", value: 1 },
+        {
+          metric: "gateway_http_requests_total",
+          operation: "mcp",
+          principalKind: "work-mcp",
+          result: "succeeded",
+        },
+        {
+          metric: "gateway_http_request_duration_ms",
+          operation: "mcp",
+          result: "succeeded",
+          value: expect.any(Number),
+        },
+        { metric: "gateway_http_in_flight", operation: "mcp", value: -1 },
+      ]);
+      expect(JSON.stringify({ events, metrics })).not.toContain(
+        "SENTINEL-MCP-FILE-ID",
+      );
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("emits one closed terminal telemetry set for Work MCP auth failures and Drive tool failures", async () => {
+    const events: MarkdownApiAuditEvent[] = [];
+    const metrics: MarkdownMetricObservation[] = [];
+    const fixture = await start({
+      service: {
+        async listMarkdown() {
+          throw new DriveProviderError("transient", "list-children");
+        },
+        async searchMarkdown() {
+          return [];
+        },
+        async readMarkdown() {
+          return { ...metadata, content: "hello" };
+        },
+      },
+      auditLogger: { info: (event) => events.push(event) },
+      metricRecorder: { record: (observation) => metrics.push(observation) },
+      operationId: (() => {
+        let number = 0;
+        return () => `mcp-operation-${++number}`;
+      })(),
+    });
+    try {
+      const unauthorized = await fetch(fixture.endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer SENTINEL-UNTRUSTED-CREDENTIAL",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      });
+      expect(unauthorized.status).toBe(401);
+
+      const driveFailure = await rawMcpResponse(fixture.endpoint, {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "list_markdown", arguments: {} },
+      });
+      expect(driveFailure.response.status).toBe(200);
+
+      expect(events).toEqual([
+        expect.objectContaining({
+          event: "markdown-api-request",
+          operationId: "mcp-operation-1",
+          operation: "mcp",
+          principal: { kind: "unauthenticated" },
+          result: "unauthenticated",
+          statusCode: 401,
+        }),
+        expect.objectContaining({
+          event: "markdown-api-request",
+          operationId: "mcp-operation-2",
+          operation: "mcp",
+          principal: {
+            kind: "work-mcp",
+            subject: "work-user",
+            issuer: "issuer",
+          },
+          result: "upstream_unavailable",
+          statusCode: 200,
+          dependency: "drive",
+          dependencyFailure: "transient",
+        }),
+      ]);
+      expect(metrics).toEqual([
+        {
+          metric: "gateway_http_in_flight",
+          operation: "mcp",
+          value: 1,
+        },
+        {
+          metric: "gateway_http_requests_total",
+          operation: "mcp",
+          principalKind: "unauthenticated",
+          result: "unauthenticated",
+        },
+        {
+          metric: "gateway_http_request_duration_ms",
+          operation: "mcp",
+          result: "unauthenticated",
+          value: expect.any(Number),
+        },
+        {
+          metric: "gateway_http_in_flight",
+          operation: "mcp",
+          value: -1,
+        },
+        {
+          metric: "gateway_http_in_flight",
+          operation: "mcp",
+          value: 1,
+        },
+        {
+          metric: "gateway_http_requests_total",
+          operation: "mcp",
+          principalKind: "work-mcp",
+          result: "upstream_unavailable",
+        },
+        {
+          metric: "gateway_http_request_duration_ms",
+          operation: "mcp",
+          result: "upstream_unavailable",
+          value: expect.any(Number),
+        },
+        {
+          metric: "gateway_http_in_flight",
+          operation: "mcp",
+          value: -1,
+        },
+        {
+          metric: "gateway_dependency_failures_total",
+          operation: "mcp",
+          dependency: "drive",
+          failure: "transient",
+        },
+      ]);
+      const serialized = JSON.stringify({ events, metrics });
+      expect(serialized).not.toContain("SENTINEL-UNTRUSTED-CREDENTIAL");
+      expect(serialized).not.toContain('"list_markdown"');
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("preserves MCP responses when audit and metric sinks throw", async () => {
+    const fixture = await start({
+      auditLogger: {
+        info() {
+          throw new Error("SENTINEL-AUDIT-SINK");
+        },
+      },
+      metricRecorder: {
+        record() {
+          throw new Error("SENTINEL-METRIC-SINK");
+        },
+      },
+    });
+    try {
+      const response = await rawMcpResponse(fixture.endpoint, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+      });
+      expect(response.response.status).toBe(200);
+      expect(response.text).not.toContain("SENTINEL");
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("advertises exactly the six safe tools and delegates each through the shared seams", async () => {
     const calls: string[] = [];
     const session: MarkdownWriteSession = {
@@ -427,6 +651,98 @@ describe("stateless MCP adapter", () => {
     }
   });
 
+  it("rejects response-expanding IDs and batches before tool dispatch", async () => {
+    let reads = 0;
+    const fixture = await start({
+      service: {
+        async listMarkdown() {
+          return [];
+        },
+        async searchMarkdown() {
+          return [];
+        },
+        async readMarkdown() {
+          reads += 1;
+          return { ...metadata, content: "SENTINEL-SHOULD-NOT-LEAK" };
+        },
+      },
+    });
+    try {
+      const longId = await rawMcpResponse(fixture.endpoint, {
+        jsonrpc: "2.0",
+        id: "x".repeat(3_800),
+        method: "tools/call",
+        params: { name: "read_markdown", arguments: { fileId: "guide-file" } },
+      });
+      expect(longId.response.status).toBe(400);
+      expect(Buffer.byteLength(longId.text, "utf8")).toBeLessThanOrEqual(
+        fixture.dependencies.config.http.maxJsonResponseBytes,
+      );
+      expect(JSON.parse(longId.text)).toMatchObject({
+        jsonrpc: "2.0",
+        error: { code: -32600 },
+        id: null,
+      });
+      expect(longId.text).not.toContain("SENTINEL-SHOULD-NOT-LEAK");
+
+      const singleMessageBatch = await rawMcpResponse(fixture.endpoint, [
+        {
+          jsonrpc: "2.0",
+          id: "x".repeat(3_800),
+          method: "tools/call",
+          params: {
+            name: "read_markdown",
+            arguments: { fileId: "guide-file" },
+          },
+        },
+      ]);
+      expect(singleMessageBatch.response.status).toBe(400);
+      expect(
+        Buffer.byteLength(singleMessageBatch.text, "utf8"),
+      ).toBeLessThanOrEqual(
+        fixture.dependencies.config.http.maxJsonResponseBytes,
+      );
+      expect(JSON.parse(singleMessageBatch.text)).toMatchObject({
+        jsonrpc: "2.0",
+        error: { code: -32600 },
+        id: null,
+      });
+
+      const batch = await rawMcpResponse(fixture.endpoint, [
+        {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "read_markdown",
+            arguments: { fileId: "guide-file" },
+          },
+        },
+        {
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: {
+            name: "read_markdown",
+            arguments: { fileId: "guide-file" },
+          },
+        },
+      ]);
+      expect(batch.response.status).toBe(400);
+      expect(Buffer.byteLength(batch.text, "utf8")).toBeLessThanOrEqual(
+        fixture.dependencies.config.http.maxJsonResponseBytes,
+      );
+      expect(JSON.parse(batch.text)).toMatchObject({
+        jsonrpc: "2.0",
+        error: { code: -32600 },
+        id: null,
+      });
+      expect(reads).toBe(0);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("returns safe tool errors, disables writes by default, and does not retry conflicts", async () => {
     let updates = 0;
     const fixture = await start({
@@ -597,6 +913,54 @@ describe("stateless MCP adapter", () => {
         "SENTINEL-OVERSIZE-CONTENT",
       );
       await client.close();
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("does not leak oversized tool content in the raw MCP response", async () => {
+    let reads = 0;
+    const fixture = await start({
+      service: {
+        async listMarkdown() {
+          return [];
+        },
+        async searchMarkdown() {
+          return [];
+        },
+        async readMarkdown() {
+          reads += 1;
+          return {
+            ...metadata,
+            content: "SENTINEL-OVERSIZE-RAW-CONTENT-".repeat(100),
+          };
+        },
+      },
+    });
+    try {
+      const result = await rawMcpResponse(fixture.endpoint, {
+        jsonrpc: "2.0",
+        id: "raw-read",
+        method: "tools/call",
+        params: { name: "read_markdown", arguments: { fileId: "guide-file" } },
+      });
+      expect(result.response.status).toBe(200);
+      expect(Buffer.byteLength(result.text, "utf8")).toBeLessThanOrEqual(
+        fixture.dependencies.config.http.maxJsonResponseBytes,
+      );
+      expect(JSON.parse(result.text)).toMatchObject({
+        jsonrpc: "2.0",
+        id: "raw-read",
+        result: {
+          structuredContent: {
+            ok: false,
+            error: { code: "RESULT_LIMIT_EXCEEDED" },
+          },
+          isError: true,
+        },
+      });
+      expect(result.text).not.toContain("SENTINEL-OVERSIZE-RAW-CONTENT");
+      expect(reads).toBe(1);
     } finally {
       await fixture.close();
     }

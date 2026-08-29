@@ -5,6 +5,7 @@ import { isWellFormedUtf16 } from "../domain/markdown.js";
 import type { DriveProviderFailure } from "../drive/provider-error.js";
 
 export type MarkdownApiOperation =
+  | "mcp"
   | "list_markdown"
   | "search_markdown"
   | "read_markdown"
@@ -103,6 +104,77 @@ export const noOpMetricRecorder: MetricRecorder = {
   record: () => undefined,
 };
 
+/** Records a request start without allowing recorder availability to affect it. */
+export function recordOperationInFlight(
+  metricRecorder: MetricRecorder,
+  operation: MarkdownApiOperation,
+): void {
+  try {
+    metricRecorder.record({
+      metric: "gateway_http_in_flight",
+      operation,
+      value: 1,
+    });
+  } catch {
+    // Telemetry availability cannot affect request handling.
+  }
+}
+
+/** Emits the closed terminal telemetry set after an operation has been classified. */
+export function recordOperationTerminal(
+  auditLogger: AuditLogger,
+  metricRecorder: MetricRecorder,
+  event: MarkdownApiAuditEvent,
+): void {
+  try {
+    auditLogger.info(event);
+  } catch {
+    // Telemetry availability cannot affect an already-classified response.
+  }
+  try {
+    metricRecorder.record({
+      metric: "gateway_http_requests_total",
+      operation: event.operation,
+      principalKind: event.principal.kind,
+      result: event.result,
+    });
+    metricRecorder.record({
+      metric: "gateway_http_request_duration_ms",
+      operation: event.operation,
+      result: event.result,
+      value: event.durationMs,
+    });
+    metricRecorder.record({
+      metric: "gateway_http_in_flight",
+      operation: event.operation,
+      value: -1,
+    });
+    if (event.result === "rate_limited") {
+      metricRecorder.record({
+        metric: "gateway_rate_limit_rejections_total",
+        operation: event.operation,
+        principalKind: event.principal.kind,
+      });
+    }
+    if (event.result === "timeout") {
+      metricRecorder.record({
+        metric: "gateway_request_timeouts_total",
+        operation: event.operation,
+      });
+    }
+    if (event.dependencyFailure !== undefined) {
+      metricRecorder.record({
+        metric: "gateway_dependency_failures_total",
+        operation: event.operation,
+        dependency: "drive",
+        failure: event.dependencyFailure,
+      });
+    }
+  } catch {
+    // Telemetry availability cannot affect an already-classified response.
+  }
+}
+
 const pinoOptions = {
   redact: {
     paths: [
@@ -148,9 +220,11 @@ function isSafeAuditString(value: string): boolean {
   );
 }
 
-/** Returns an opaque file ID only when it is safe for the bounded audit schema. */
+/** Returns a canonical opaque provider ID only when it is safe for the audit schema. */
 export function auditFileId(value: string | undefined): string | undefined {
-  return value !== undefined && isSafeAuditString(value) ? value : undefined;
+  return value !== undefined && /^[A-Za-z0-9_-]{1,256}$/u.test(value)
+    ? value
+    : undefined;
 }
 
 /** Converts only already-normalized principal facts into an audit-safe identity. */

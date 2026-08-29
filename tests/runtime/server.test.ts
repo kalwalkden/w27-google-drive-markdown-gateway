@@ -238,8 +238,12 @@ describe("runtime composition", () => {
   it("composes JSON and MCP routes with the same bounded dependencies", async () => {
     let api: unknown;
     let mcp: unknown;
+    const auditLogger = { info() {} };
+    const metricRecorder = { record() {} };
     const runtime = await composeRuntime(config("shared-drive-adc"), {
       ...runtimeDependencies([]),
+      auditLogger,
+      metricRecorder,
       createApiApp: (dependencies) => {
         api = dependencies;
         return express();
@@ -264,6 +268,14 @@ describe("runtime composition", () => {
     );
     expect((api as { principalVerifier: unknown }).principalVerifier).toBe(
       (mcp as { principalVerifier: unknown }).principalVerifier,
+    );
+    expect((api as { auditLogger: unknown }).auditLogger).toBe(auditLogger);
+    expect((mcp as { auditLogger: unknown }).auditLogger).toBe(auditLogger);
+    expect((api as { metricRecorder: unknown }).metricRecorder).toBe(
+      metricRecorder,
+    );
+    expect((mcp as { metricRecorder: unknown }).metricRecorder).toBe(
+      metricRecorder,
     );
   });
 

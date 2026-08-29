@@ -394,3 +394,20 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
   vendored skills. No live Drive, Work, Codex cloud, credential, or external network call ran.
 - Status: Work and Codex feature repairs await fresh feature review; operational task 001 complete
   and awaits independent task review.
+
+## 2026-08-29 — Client boundary and telemetry repair round
+
+- Work MCP now enforces its byte ceiling against response-expanding JSON-RPC identifiers and
+  batches before tool dispatch. The external `/mcp` route also emits one bounded terminal
+  audit/metric lifecycle with the same closed Drive-failure categories as the JSON API.
+- Audit file identifiers now accept only a conservative opaque grammar; path-, URL-, and
+  credential-shaped provider values are omitted rather than serialized.
+- The Codex CLI constructs every route on the configured origin, closing a repeated-slash
+  scheme-relative bearer disclosure. The local cloud harness now reports the committed runtime's
+  direct-root/write/archive gates as `BLOCKED` without making a gateway call.
+- Future operator evidence handling uses physical path checks and atomic no-follow publication;
+  uncertain creation retains only an opaque cleanup reference, and archive success requires exact
+  identity and destination proof.
+- Validation: full combined `CI=true pnpm check` passed with 241 tests, build verification, and 10
+  vendored skills. No live Drive, Work, Codex cloud, credential, or external network call ran.
+- Status: repaired; fresh independent Work, Codex, and operational acceptance reruns pending.

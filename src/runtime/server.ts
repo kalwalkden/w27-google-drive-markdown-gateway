@@ -16,7 +16,7 @@ import {
   createStatelessMcpApp,
   type StatelessMcpDependencies,
 } from "../mcp/stateless-mcp.js";
-import type { MetricRecorder } from "../observability/audit.js";
+import type { AuditLogger, MetricRecorder } from "../observability/audit.js";
 import {
   loadOAuthCredentials,
   type OAuthSecretReader,
@@ -45,6 +45,7 @@ export interface RuntimeDependencies {
   readonly createVerifier?: (config: ServiceConfig) => PrincipalVerifier;
   readonly createApiApp?: (dependencies: JsonApiDependencies) => Express;
   readonly metricRecorder?: MetricRecorder;
+  readonly auditLogger?: AuditLogger;
   readonly createMcpApp?: (dependencies: StatelessMcpDependencies) => Express;
   readonly listen?: (app: Express, port: number) => RuntimeListener;
   readonly waitForListener?: (listener: RuntimeListener) => Promise<void>;
@@ -136,6 +137,9 @@ export async function composeRuntime(
     ...(dependencies.metricRecorder === undefined
       ? {}
       : { metricRecorder: dependencies.metricRecorder }),
+    ...(dependencies.auditLogger === undefined
+      ? {}
+      : { auditLogger: dependencies.auditLogger }),
   };
   const app = express();
   app.use((dependencies.createApiApp ?? createJsonApiApp)(apiDependencies));
@@ -147,6 +151,12 @@ export async function composeRuntime(
       service,
       principalVerifier,
       writeSessionProvider: undefined,
+      ...(dependencies.metricRecorder === undefined
+        ? {}
+        : { metricRecorder: dependencies.metricRecorder }),
+      ...(dependencies.auditLogger === undefined
+        ? {}
+        : { auditLogger: dependencies.auditLogger }),
     }),
   );
   return { config, app };
