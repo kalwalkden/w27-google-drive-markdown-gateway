@@ -36,6 +36,17 @@ function run(
 }
 
 describe("md-drive", () => {
+  it("keeps the executable shebang and post-build permission verifier", async () => {
+    const source = await readFile(
+      new URL("../../src/codex-cli/cli.ts", import.meta.url),
+      "utf8",
+    );
+    const packageJson = JSON.parse(
+      await readFile(new URL("../../package.json", import.meta.url), "utf8"),
+    ) as { build?: string; scripts?: { build?: string } };
+    expect(source.startsWith("#!/usr/bin/env node\n")).toBe(true);
+    expect(packageJson.scripts?.build).toContain("mark-cli-executable.mjs");
+  });
   it("ships a Node shebang for the package bin", async () => {
     const [source, manifest] = await Promise.all([
       readFile(new URL("../../src/codex-cli/cli.ts", import.meta.url), "utf8"),

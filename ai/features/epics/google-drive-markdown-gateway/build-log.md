@@ -319,3 +319,16 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - Validation: full combined `CI=true pnpm check` passed with 197 tests; the built bin reports the
   expected version. No live endpoint, credential, Drive, or external network call ran.
 - Status: repaired; independent task re-review pending
+
+## 2026-08-29 — Search completeness, MCP discovery, and executable-bin repairs
+
+- Drive search now detects duplicate canonical paths across complete bounded enumeration before
+  slicing results. List overflow is an opaque signal handled before parsing or fetching the extra
+  provider resource, so malformed sentinels still produce the stable result-limit outcome.
+- MCP discovery now publishes real strict `oneOf` success/error variants verified with AJV, and
+  maps result limits to the stable public result-limit error.
+- The build now marks the generated `md-drive` bin executable and directly self-tests it through
+  its shebang; TypeScript output mode can no longer leave the declared command unusable.
+- Validation: full combined `CI=true pnpm check` passed with 200 tests, including the executable
+  artifact self-check. No live service, Drive, client, credential, or external network call ran.
+- Status: repaired; final independent reruns pending

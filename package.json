@@ -16,7 +16,7 @@
     "format:check": "biome format .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/mark-cli-executable.mjs",
     "drive:probe": "node dist/live-drive/cli.js",
     "verify:vendored-skills": "./scripts/verify-vendored-skills.sh",
     "check": "pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run test && pnpm run build && pnpm run verify:vendored-skills"
