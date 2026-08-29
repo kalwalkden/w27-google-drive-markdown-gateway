@@ -36,3 +36,12 @@ the repository architecture documentation.
   gateway bearer credentials.
 - Keep Google Drive operations confined to the configured Markdown root.
 - Preserve revision-checked updates and the no-permanent-deletion constraint from the handoff.
+
+<!-- discover-architecture:start -->
+## Architecture
+Full report: `ARCHITECTURE.md`
+
+- Lint/format: not configured
+- Type-check: not configured
+- Test: `./scripts/verify-vendored-skills.sh` (setup integrity only)
+<!-- discover-architecture:end -->

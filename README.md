@@ -6,6 +6,10 @@ Google Drive folder.
 The initial product and architecture brief is in
 [`google-drive-markdown-gateway-handoff.md`](google-drive-markdown-gateway-handoff.md).
 
+The current repository architecture and approved implementation program are in
+[`ARCHITECTURE.md`](ARCHITECTURE.md) and
+[`ai/features/epics/google-drive-markdown-gateway/`](ai/features/epics/google-drive-markdown-gateway/).
+
 ## Codex workflow setup
 
 The repository vendors its planning, implementation, and review workflow skills under
