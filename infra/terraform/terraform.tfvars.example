@@ -11,6 +11,14 @@ work_mcp_issuer          = "https://issuer.example.invalid"
 work_mcp_audience        = "replace-with-audience"
 work_mcp_jwks_url        = "https://keys.example.invalid/jwks"
 
+# Required only for a reviewed full plan/apply that creates or changes Cloud Run.
+# Keep false for the reviewed Artifact Registry bootstrap apply.
+acknowledge_production_service_apply = false
+
+# Public invocation is separately disabled and requires its own acknowledgement.
+allow_public_invoker       = false
+acknowledge_public_invoker = false
+
 # For my-drive-refresh-token instead, set drive_auth_mode accordingly and set only the
 # existing OAuth secret identifier. Its payload stays in Secret Manager.
 # oauth_secret_id = "replace-with-existing-oauth-secret-id"

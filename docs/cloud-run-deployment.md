@@ -26,21 +26,37 @@ only existing secret identifiers and mounted versions.
 ## Prepare and review a deployment
 
 1. Copy `infra/terraform/terraform.tfvars.example` to an operator-controlled location outside the
-   repository. Supply only deployment identifiers, public JWT settings, Drive IDs, and an immutable
-   Artifact Registry image digest.
-2. Build and push the image using the repository `Dockerfile`, then record its immutable digest.
-   Do not use a mutable image tag for `container_image`.
-3. From `infra/terraform`, run `terraform init`, then `terraform fmt -check`,
-   `terraform validate`, and a reviewed `terraform plan` with the external variable file. Provider
-   initialization and all cloud access are operator actions; they are deliberately not repository
-   tests.
-4. Confirm that the plan grants `roles/secretmanager.secretAccessor` only to the runtime service
+   repository. Supply only deployment identifiers, public JWT settings, Drive IDs, and the two
+   applicable acknowledgements. For the registry bootstrap, set `container_image` to a syntactically
+   valid placeholder digest; Terraform validates required inputs before it honors the target, but the
+   targeted plan never creates a Cloud Run revision from that placeholder.
+2. From `infra/terraform`, run `terraform init`, `terraform fmt -check`, and `terraform validate`.
+   Then review and apply a deliberately scoped bootstrap plan using
+   `-target=google_artifact_registry_repository.gateway`. This one-time bootstrap creates the
+   destination repository in Terraform state before any image push; it does not create or change the
+   Cloud Run service. For example, with the external non-secret variable file, use a placeholder
+   only for this targeted operation:
+
+   ```sh
+   terraform plan -target=google_artifact_registry_repository.gateway -var-file=/operator/path/gateway.tfvars -var='container_image=bootstrap.invalid/gateway@sha256:0000000000000000000000000000000000000000000000000000000000000000'
+   terraform apply -target=google_artifact_registry_repository.gateway -var-file=/operator/path/gateway.tfvars -var='container_image=bootstrap.invalid/gateway@sha256:0000000000000000000000000000000000000000000000000000000000000000'
+   ```
+
+   Do not import the repository after this bootstrap.
+3. Build and push the image to that created repository using the repository `Dockerfile`, then
+   record its immutable digest. Set `container_image` to that digest; do not use a mutable tag.
+4. Review a full Terraform plan with `acknowledge_production_service_apply=true`. It is required
+   before Terraform can create or change the production Cloud Run service, and is separate from the
+   public-invoker acknowledgement. Provider initialization and all cloud access are operator
+   actions; they are deliberately not repository tests.
+5. Confirm that the plan grants `roles/secretmanager.secretAccessor` only to the runtime service
    account and only on the named existing secret objects. It must create no service-account key,
    secret payload, project-wide Drive role, or broad Owner/Editor role.
-5. Apply only after normal change approval. `allow_public_invoker` defaults to false. Set it and
-   `acknowledge_public_invoker` to true only if public Cloud Run invocation has been explicitly
-   approved. Otherwise arrange an approved identity-aware ingress or explicit invoker binding.
-   Application bearer/OAuth verification remains mandatory in either case.
+6. Apply the reviewed full plan only after normal change approval. The service acknowledgement is
+   false by default and must remain false for registry-only bootstrap work. `allow_public_invoker`
+   also defaults to false; set it and `acknowledge_public_invoker` to true only if public Cloud Run
+   invocation has been explicitly approved. Otherwise arrange an approved identity-aware ingress or
+   explicit invoker binding. Application bearer/OAuth verification remains mandatory in either case.
 
 The Cloud Run service mounts the Codex bearer file for every mode. My Drive additionally mounts its
 OAuth credential only when selected. The service config contains the mount paths, never their

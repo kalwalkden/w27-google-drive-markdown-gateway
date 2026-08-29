@@ -163,16 +163,31 @@ variable "oauth_secret_mount_path" {
 variable "work_mcp_issuer" {
   type        = string
   description = "HTTPS issuer URL for the Work MCP JWT principal."
+
+  validation {
+    condition     = can(regex("^https://[^/?#@]+(/[^?#]*)?$", lower(var.work_mcp_issuer)))
+    error_message = "work_mcp_issuer must be an HTTPS URL without credentials, query, or fragment."
+  }
 }
 
 variable "work_mcp_audience" {
   type        = string
   description = "Expected Work MCP JWT audience."
+
+  validation {
+    condition     = trimspace(var.work_mcp_audience) != ""
+    error_message = "work_mcp_audience must not be blank."
+  }
 }
 
 variable "work_mcp_jwks_url" {
   type        = string
   description = "HTTPS JWKS URL for the Work MCP JWT principal."
+
+  validation {
+    condition     = can(regex("^https://[^/?#@]+(/[^?#]*)?$", lower(var.work_mcp_jwks_url)))
+    error_message = "work_mcp_jwks_url must be an HTTPS URL without credentials, query, or fragment."
+  }
 }
 
 variable "work_mcp_allowed_algorithms" {
@@ -201,78 +216,165 @@ variable "work_mcp_jwks_timeout_ms" {
   type        = number
   description = "JWKS request timeout in milliseconds."
   default     = 5000
+
+  validation {
+    condition     = var.work_mcp_jwks_timeout_ms >= 100 && var.work_mcp_jwks_timeout_ms <= 30000 && floor(var.work_mcp_jwks_timeout_ms) == var.work_mcp_jwks_timeout_ms
+    error_message = "work_mcp_jwks_timeout_ms must be an integer from 100 to 30000."
+  }
 }
 
 variable "work_mcp_jwks_cache_max_age_ms" {
   type        = number
   description = "JWKS cache maximum age in milliseconds."
   default     = 60000
+
+  validation {
+    condition     = var.work_mcp_jwks_cache_max_age_ms >= 1000 && var.work_mcp_jwks_cache_max_age_ms <= 3600000 && floor(var.work_mcp_jwks_cache_max_age_ms) == var.work_mcp_jwks_cache_max_age_ms
+    error_message = "work_mcp_jwks_cache_max_age_ms must be an integer from 1000 to 3600000."
+  }
 }
 
 variable "max_markdown_bytes" {
   type        = number
   description = "Maximum Markdown bytes accepted and read."
   default     = 1000000
+
+  validation {
+    condition     = var.max_markdown_bytes >= 1 && var.max_markdown_bytes <= 10000000 && floor(var.max_markdown_bytes) == var.max_markdown_bytes
+    error_message = "max_markdown_bytes must be an integer from 1 to 10000000."
+  }
 }
 
 variable "max_traversal_nodes" {
   type        = number
   description = "Maximum Drive traversal nodes."
   default     = 1000
+
+  validation {
+    condition     = var.max_traversal_nodes >= 1 && var.max_traversal_nodes <= 10000 && floor(var.max_traversal_nodes) == var.max_traversal_nodes
+    error_message = "max_traversal_nodes must be an integer from 1 to 10000."
+  }
 }
 
 variable "max_pages" {
   type        = number
   description = "Maximum Drive API pages per operation."
   default     = 100
+
+  validation {
+    condition     = var.max_pages >= 1 && var.max_pages <= 100 && floor(var.max_pages) == var.max_pages
+    error_message = "max_pages must be an integer from 1 to 100."
+  }
 }
 
 variable "max_results" {
   type        = number
   description = "Maximum Drive result count."
   default     = 100
+
+  validation {
+    condition     = var.max_results >= 1 && var.max_results <= 1000 && floor(var.max_results) == var.max_results
+    error_message = "max_results must be an integer from 1 to 1000."
+  }
+}
+
+variable "max_request_markdown_bytes" {
+  type        = number
+  description = "Maximum Markdown bytes accepted by the JSON API."
+  default     = 1000000
+
+  validation {
+    condition     = var.max_request_markdown_bytes >= 1 && var.max_request_markdown_bytes <= 1048576 && floor(var.max_request_markdown_bytes) == var.max_request_markdown_bytes
+    error_message = "max_request_markdown_bytes must be an integer from 1 to 1048576."
+  }
+}
+
+variable "max_result_items" {
+  type        = number
+  description = "Maximum result items returned by the JSON API."
+  default     = 100
+
+  validation {
+    condition     = var.max_result_items >= 1 && var.max_result_items <= 100 && floor(var.max_result_items) == var.max_result_items
+    error_message = "max_result_items must be an integer from 1 to 100."
+  }
 }
 
 variable "max_json_body_bytes" {
   type        = number
   description = "Maximum JSON body bytes."
   default     = 6004096
+
+  validation {
+    condition     = var.max_json_body_bytes >= 4096 && var.max_json_body_bytes <= 6295552 && floor(var.max_json_body_bytes) == var.max_json_body_bytes
+    error_message = "max_json_body_bytes must be an integer from 4096 to 6295552."
+  }
 }
 
 variable "max_json_response_bytes" {
   type        = number
   description = "Maximum JSON response bytes."
   default     = 1000000
+
+  validation {
+    condition     = var.max_json_response_bytes >= 4096 && var.max_json_response_bytes <= 6295552 && floor(var.max_json_response_bytes) == var.max_json_response_bytes
+    error_message = "max_json_response_bytes must be an integer from 4096 to 6295552."
+  }
 }
 
 variable "http_request_timeout_ms" {
   type        = number
   description = "Application response deadline in milliseconds."
   default     = 5000
+
+  validation {
+    condition     = var.http_request_timeout_ms >= 100 && var.http_request_timeout_ms <= 30000 && floor(var.http_request_timeout_ms) == var.http_request_timeout_ms
+    error_message = "http_request_timeout_ms must be an integer from 100 to 30000."
+  }
 }
 
 variable "rate_limit_window_ms" {
   type        = number
   description = "Per-principal rate-limit window in milliseconds."
   default     = 60000
+
+  validation {
+    condition     = var.rate_limit_window_ms >= 1000 && var.rate_limit_window_ms <= 60000 && floor(var.rate_limit_window_ms) == var.rate_limit_window_ms
+    error_message = "rate_limit_window_ms must be an integer from 1000 to 60000."
+  }
 }
 
 variable "max_requests_per_window" {
   type        = number
   description = "Maximum requests per rate-limit window."
   default     = 60
+
+  validation {
+    condition     = var.max_requests_per_window >= 1 && var.max_requests_per_window <= 120 && floor(var.max_requests_per_window) == var.max_requests_per_window
+    error_message = "max_requests_per_window must be an integer from 1 to 120."
+  }
 }
 
 variable "max_concurrent_requests_per_principal" {
   type        = number
   description = "Maximum concurrent requests per principal."
   default     = 4
+
+  validation {
+    condition     = var.max_concurrent_requests_per_principal >= 1 && var.max_concurrent_requests_per_principal <= 16 && floor(var.max_concurrent_requests_per_principal) == var.max_concurrent_requests_per_principal
+    error_message = "max_concurrent_requests_per_principal must be an integer from 1 to 16."
+  }
 }
 
 variable "max_rate_limit_principals" {
   type        = number
   description = "Bound for in-memory rate-limit principal tracking."
   default     = 1000
+
+  validation {
+    condition     = var.max_rate_limit_principals >= 1 && var.max_rate_limit_principals <= 10000 && floor(var.max_rate_limit_principals) == var.max_rate_limit_principals
+    error_message = "max_rate_limit_principals must be an integer from 1 to 10000."
+  }
 }
 
 variable "container_concurrency" {
@@ -325,7 +427,7 @@ variable "cpu" {
   default     = "1"
 
   validation {
-    condition     = contains(["1", "2", "4", "6", "8"], var.cpu)
+    condition     = contains(["1", "2", "4"], var.cpu)
     error_message = "cpu must be a supported bounded Cloud Run CPU limit."
   }
 }
@@ -336,8 +438,8 @@ variable "memory" {
   default     = "512Mi"
 
   validation {
-    condition     = can(regex("^[1-9][0-9]*(Mi|Gi)$", var.memory))
-    error_message = "memory must be a positive Mi or Gi quantity."
+    condition     = contains(["512Mi", "1Gi", "2Gi", "4Gi", "8Gi"], var.memory)
+    error_message = "memory must be one of 512Mi, 1Gi, 2Gi, 4Gi, or 8Gi."
   }
 }
 
@@ -361,5 +463,11 @@ variable "allow_public_invoker" {
 variable "acknowledge_public_invoker" {
   type        = bool
   description = "Explicit operator acknowledgement required before creating an allUsers binding."
+  default     = false
+}
+
+variable "acknowledge_production_service_apply" {
+  type        = bool
+  description = "Explicit operator acknowledgement required before creating or changing the production Cloud Run service."
   default     = false
 }
