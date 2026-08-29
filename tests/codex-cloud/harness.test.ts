@@ -1,14 +1,18 @@
 import {
   access,
   lstat,
+  mkdir,
   mkdtemp,
   readFile,
   rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 import { describe, expect, it } from "vitest";
 import {
   assertSanitizedEvidence,
@@ -22,10 +26,36 @@ import {
   main,
   parseHarnessArgs,
   publishExternalEvidence,
+  resolveInstallationBoundary,
 } from "../../src/codex-cloud/harness-cli.js";
 
 const runId = "00000000-0000-4000-8000-000000000001";
 const timestamp = "2026-08-29T12:00:00.000Z";
+async function invokeEntrypoint(
+  entrypoint: string,
+  args: readonly string[],
+): Promise<Readonly<{ exitCode: number | null; stderr: string }>> {
+  return new Promise((resolveResult, reject) => {
+    const child = spawn(process.execPath, [entrypoint, ...args], {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.once("error", reject);
+    child.once("close", (exitCode) => resolveResult({ exitCode, stderr }));
+  });
+}
+
+function compileHarness(source: string): string {
+  return transpileModule(source, {
+    compilerOptions: {
+      module: ModuleKind.ESNext,
+      target: ScriptTarget.ES2023,
+    },
+  }).outputText;
+}
 const config = {
   cliExecutable: "md-drive",
   validationFolder: "nested/validation",
@@ -422,6 +452,45 @@ describe("Codex cloud harness", () => {
       "create",
     ]);
   });
+  it.each([
+    ["credentialInjection", "unavailable"],
+    ["exactHostnameEgress", "unavailable"],
+  ] as const)(
+    "blocks before temporary content or commands when %s is %s",
+    async (control, status) => {
+      const fake = fakeRunner();
+      const result = await runHarness(
+        {
+          ...config,
+          platformControls: { ...config.platformControls, [control]: status },
+        },
+        confirmation,
+        fake.runner,
+        dependencies,
+      );
+      expect(result).toMatchObject({
+        overall: "inconclusive",
+        cleanup: "passed",
+        manualRecovery: { required: false },
+        gatewayCapabilities: {
+          observed: {
+            topology: "not-observed",
+            writes: "not-observed",
+            archive: "not-observed",
+          },
+        },
+      });
+      expect(Object.values(result.operationOutcomes)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            outcome: "inconclusive",
+            code: "NOT_ATTEMPTED",
+          }),
+        ]),
+      );
+      expect(fake.calls).toHaveLength(0);
+    },
+  );
   it("accepts the single-destination duplicate refusal after proving the original file is unchanged", async () => {
     const fake = fakeRunner("duplicate-invalid-path");
     const result = await runHarness(
@@ -565,9 +634,14 @@ describe("Codex cloud harness output safety", () => {
   it("rejects config and output paths that resolve inside the repository", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-cloud-path-"));
     const link = join(directory, "repo-link");
-    const root = resolve(".");
+    const sourceAnchor = fileURLToPath(
+      new URL("../../src/codex-cloud/harness-cli.ts", import.meta.url),
+    );
+    const { repositoryRoot: root, cliPath } =
+      await resolveInstallationBoundary(sourceAnchor);
     await symlink(root, link);
     try {
+      expect(cliPath).toBe(join(root, "dist", "codex-cli", "cli.js"));
       await expect(
         externalRegularFile(join(link, "package.json"), root),
       ).rejects.toThrow("repository-path");
@@ -576,6 +650,95 @@ describe("Codex cloud harness output safety", () => {
       ).rejects.toThrow("repository-path");
     } finally {
       await rm(directory, { recursive: true, force: true });
+    }
+  });
+  it("uses an installation-relative boundary when its module anchor is symlinked", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "codex-cloud-anchor-"));
+    const sourceAnchor = fileURLToPath(
+      new URL("../../src/codex-cloud/harness-cli.ts", import.meta.url),
+    );
+    const anchorLink = join(directory, "harness-cli-link.ts");
+    await symlink(sourceAnchor, anchorLink);
+    try {
+      const direct = await resolveInstallationBoundary(sourceAnchor);
+      const linked = await resolveInstallationBoundary(anchorLink);
+      expect(linked).toEqual(direct);
+      expect(linked.cliPath).toBe(
+        join(linked.repositoryRoot, "dist", "codex-cli", "cli.js"),
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+  it("runs a compiled symlink entrypoint with blocked diagnostics and inconclusive evidence", async () => {
+    const root = await mkdtemp(join(process.cwd(), ".codex-cloud-entrypoint-"));
+    const external = await mkdtemp(join(tmpdir(), "codex-cloud-entrypoint-"));
+    const dist = join(root, "dist", "codex-cloud");
+    const entrypoint = join(root, "harness-cli-link.js");
+    const sourceCli = fileURLToPath(
+      new URL("../../src/codex-cloud/harness-cli.ts", import.meta.url),
+    );
+    const sourceHarness = fileURLToPath(
+      new URL("../../src/codex-cloud/harness.ts", import.meta.url),
+    );
+    const invalidConfig = join(external, "invalid-config.json");
+    const configPath = join(external, "config.json");
+    const output = join(external, "evidence.json");
+    try {
+      await mkdir(dist, { recursive: true });
+      const [cli, harness] = await Promise.all([
+        readFile(sourceCli, "utf8"),
+        readFile(sourceHarness, "utf8"),
+      ]);
+      await Promise.all([
+        writeFile(join(dist, "harness-cli.js"), compileHarness(cli), "utf8"),
+        writeFile(join(dist, "harness.js"), compileHarness(harness), "utf8"),
+      ]);
+      await symlink(join(dist, "harness-cli.js"), entrypoint);
+      await writeFile(invalidConfig, "not-json", "utf8");
+      const blocked = await invokeEntrypoint(entrypoint, [
+        "run",
+        "--config",
+        invalidConfig,
+        "--output",
+        output,
+        "--confirm",
+        confirmation,
+      ]);
+      expect(blocked).toEqual({
+        exitCode: 2,
+        stderr: "codex-cloud harness: BLOCKED\n",
+      });
+      await expect(access(output)).rejects.toThrow();
+
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          ...config,
+          platformControls: {
+            ...config.platformControls,
+            credentialInjection: "unavailable",
+          },
+        }),
+        "utf8",
+      );
+      const inconclusive = await invokeEntrypoint(entrypoint, [
+        "run",
+        "--config",
+        configPath,
+        "--output",
+        output,
+        "--confirm",
+        confirmation,
+      ]);
+      expect(inconclusive).toEqual({ exitCode: 12, stderr: "" });
+      expect(JSON.parse(await readFile(output, "utf8"))).toMatchObject({
+        overall: "inconclusive",
+        cleanup: "passed",
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(external, { recursive: true, force: true });
     }
   });
   it("publishes 0600 evidence atomically without overwrite", async () => {

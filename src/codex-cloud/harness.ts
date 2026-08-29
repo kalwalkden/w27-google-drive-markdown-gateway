@@ -423,6 +423,32 @@ export async function runHarness(
   const runIdentifier = (dependencies.uuid ?? randomUUID)();
   const startedAt = now().toISOString();
   const outcomes = initialOutcomes();
+  if (
+    config.platformControls.credentialInjection !== "verified" ||
+    config.platformControls.exactHostnameEgress !== "verified"
+  ) {
+    return baseEvidence(config, startedAt, now().toISOString(), runIdentifier, {
+      overall: "inconclusive",
+      operationOutcomes: outcomes,
+      gatewayCapabilities: {
+        expected: {
+          topology: "nested-tree",
+          writes: "enabled",
+          archive: "enabled",
+        },
+        observed: {
+          topology: "not-observed",
+          writes: "not-observed",
+          archive: "not-observed",
+        },
+      },
+      duplicateRefusal: "inconclusive",
+      staleConflict: "inconclusive",
+      archiveVerification: "inconclusive",
+      cleanup: "passed",
+      manualRecovery: { required: false },
+    });
+  }
   let duplicateRefusal: HarnessOutcome = "inconclusive";
   let staleConflict: HarnessOutcome = "inconclusive";
   let archiveVerification: HarnessOutcome = "inconclusive";

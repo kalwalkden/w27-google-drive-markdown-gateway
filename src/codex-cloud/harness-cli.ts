@@ -16,6 +16,19 @@ import {
 
 const maximumOutputBytes = 1_048_576;
 
+export async function resolveInstallationBoundary(
+  anchor = fileURLToPath(import.meta.url),
+): Promise<Readonly<{ repositoryRoot: string; cliPath: string }>> {
+  const physicalAnchor = await realpath(anchor);
+  const repositoryRoot = await realpath(
+    resolve(dirname(physicalAnchor), "..", ".."),
+  );
+  return {
+    repositoryRoot,
+    cliPath: join(repositoryRoot, "dist", "codex-cli", "cli.js"),
+  };
+}
+
 export function isOutsideRepository(path: string, root: string): boolean {
   const value = relative(root, path);
   return value === ".." || value.startsWith(`..${sep}`);
@@ -129,27 +142,23 @@ export async function publishExternalEvidence(
   }
 }
 
-function mdDriveRunner(): CommandRunner {
+export function mdDriveRunner(cliPath: string): CommandRunner {
   return {
     run: (args) =>
       new Promise((resolveRun, reject) => {
-        const child = spawn(
-          process.execPath,
-          [resolve("dist/codex-cli/cli.js"), ...args],
-          {
-            shell: false,
-            env: Object.fromEntries(
-              Object.entries(process.env).filter(([key]) =>
-                [
-                  "MD_DRIVE_GATEWAY_URL",
-                  "MD_DRIVE_BEARER_TOKEN",
-                  "MD_DRIVE_BEARER_SECRET_FILE",
-                ].includes(key),
-              ),
+        const child = spawn(process.execPath, [cliPath, ...args], {
+          shell: false,
+          env: Object.fromEntries(
+            Object.entries(process.env).filter(([key]) =>
+              [
+                "MD_DRIVE_GATEWAY_URL",
+                "MD_DRIVE_BEARER_TOKEN",
+                "MD_DRIVE_BEARER_SECRET_FILE",
+              ].includes(key),
             ),
-            stdio: ["ignore", "pipe", "ignore"],
-          },
-        );
+          ),
+          stdio: ["ignore", "pipe", "ignore"],
+        });
         let stdout = "";
         let bytes = 0;
         child.stdout.on("data", (chunk: Buffer) => {
@@ -169,24 +178,32 @@ function mdDriveRunner(): CommandRunner {
 
 export async function main(
   args = process.argv.slice(2),
-  runner: CommandRunner = mdDriveRunner(),
+  runner?: CommandRunner,
+  anchor?: string,
 ): Promise<number> {
   try {
     const parsed = parseHarnessArgs(args);
-    const root = resolve(".");
-    const configPath = await externalRegularFile(parsed.configPath, root);
+    const boundary = await resolveInstallationBoundary(anchor);
+    const configPath = await externalRegularFile(
+      parsed.configPath,
+      boundary.repositoryRoot,
+    );
     const config = cloudHarnessConfigSchema.parse(
       await readExternalConfig(configPath),
     );
     const evidence = assertSanitizedEvidence(
-      await runHarness(config, confirmation, runner),
+      await runHarness(
+        config,
+        confirmation,
+        runner ?? mdDriveRunner(boundary.cliPath),
+      ),
       {
         forbiddenValues: [config.validationFolder, config.archiveFolder],
       },
     );
     await publishExternalEvidence(
       parsed.outputPath,
-      root,
+      boundary.repositoryRoot,
       `${JSON.stringify(evidence)}\n`,
     );
     return evidence.overall === "passed" ? 0 : 12;
@@ -196,10 +213,19 @@ export async function main(
   }
 }
 
-if (
-  process.argv[1] &&
-  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
-)
-  void main().then((code) => {
-    process.exitCode = code;
-  });
+async function runEntrypoint(): Promise<void> {
+  const entrypoint = process.argv[1];
+  if (!entrypoint) return;
+  try {
+    const [physicalEntrypoint, physicalModule] = await Promise.all([
+      realpath(resolve(entrypoint)),
+      realpath(fileURLToPath(import.meta.url)),
+    ]);
+    if (physicalEntrypoint === physicalModule) process.exitCode = await main();
+  } catch {
+    process.stderr.write("codex-cloud harness: BLOCKED\n");
+    process.exitCode = 2;
+  }
+}
+
+void runEntrypoint();
