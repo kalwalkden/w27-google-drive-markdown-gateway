@@ -32,7 +32,10 @@ import type {
 } from "../drive/drive-port.js";
 import {
   DisabledDriveWritePort,
-  GuardedDriveWriter,
+  guardedCreateFile,
+  guardedUpdateFile,
+  isGuardedDriveWriter,
+  type GuardedDriveWriter,
 } from "../drive/guarded-drive-write-port.js";
 import type { WriteLease } from "../write-gate/gate.js";
 
@@ -72,7 +75,7 @@ export class MarkdownService {
     private readonly config: MarkdownServiceConfig,
     private readonly writer: GuardedDriveWriter = new DisabledDriveWritePort(),
   ) {
-    if (!GuardedDriveWriter.isCapability(writer)) {
+    if (!isGuardedDriveWriter(writer)) {
       throw new MarkdownGatewayError(
         "UNSUPPORTED",
         "MarkdownService requires a guarded write capability.",
@@ -246,7 +249,8 @@ export class MarkdownService {
         "A file or folder already exists at this path.",
       );
     }
-    const result = await this.writer.createFile(
+    const result = await guardedCreateFile(
+      this.writer,
       lease,
       parent.node.id as FolderId,
       leaf,
@@ -277,7 +281,8 @@ export class MarkdownService {
     requireContentWithinLimit(input.content, this.maxMarkdownBytes);
     const resolved = await this.resolveFile(input);
     this.assertClosedMutationTopology(resolved);
-    const result = await this.writer.updateFile(
+    const result = await guardedUpdateFile(
+      this.writer,
       lease,
       resolved.node.id as FileId,
       input.expectedRevision,

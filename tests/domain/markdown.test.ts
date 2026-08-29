@@ -32,12 +32,21 @@ describe("Markdown domain validation", () => {
     "a/C:drive-qualified.md",
     "a/",
     "a/\u0000.md",
+    "a/\ud800.md",
+    "a/\udc00.md",
     "C:\\docs\\file.md",
     "\\\\server\\share\\file.md",
     "file.txt",
   ])("rejects unsafe or non-Markdown path %j", (path) => {
     expect(() => requireMarkdownPath(path)).toThrow(MarkdownGatewayError);
   });
+
+  it.each(["\ud800.md", "\udc00.md", "before\ud800after.md"])(
+    "rejects unpaired UTF-16 surrogates in caller paths before canonicalization",
+    (path) => {
+      expect(() => parseRelativePath(path)).toThrow(MarkdownGatewayError);
+    },
+  );
 
   it("allows empty Markdown content and rejects only values beyond the byte boundary", () => {
     expect(() => requireContentWithinLimit("", 0)).not.toThrow();

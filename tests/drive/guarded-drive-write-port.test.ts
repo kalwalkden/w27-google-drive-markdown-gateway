@@ -1,23 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  fileId,
-  folderId,
-  revision,
-  type FileId,
-  type FolderId,
-  type Revision,
-} from "../../src/domain/markdown.js";
+import { fileId, folderId, revision } from "../../src/domain/markdown.js";
 import {
   DisabledDriveWritePort,
-  GuardedDriveWriter,
   GuardedDriveWritePort,
+  guardedCreateFile,
+  guardedMoveFile,
+  guardedUpdateFile,
+  isGuardedDriveWriter,
+  type GuardedDriveWriter,
 } from "../../src/drive/guarded-drive-write-port.js";
-import type {
-  ConditionalWriteResult,
-  CreateWriteResult,
-  RawDriveWritePort,
-} from "../../src/drive/drive-port.js";
+import type { RawDriveWritePort } from "../../src/drive/drive-port.js";
 import { WriteGate, WriteLease } from "../../src/write-gate/gate.js";
 import { InMemoryConsumedApprovalStore } from "../../src/write-gate/replay-store.js";
 import {
@@ -43,40 +36,6 @@ function raw(events: string[]): RawDriveWritePort {
       return { outcome: "unsupported" };
     },
   };
-}
-
-class ExternalWriter extends GuardedDriveWriter {
-  constructor() {
-    super(Symbol("external-writer"));
-  }
-
-  createFile(
-    _lease: WriteLease,
-    _parentId: FolderId,
-    _name: string,
-    _content: string,
-  ): Promise<CreateWriteResult> {
-    return Promise.resolve({ outcome: "unsupported" });
-  }
-
-  updateFile(
-    _lease: WriteLease,
-    _fileId: FileId,
-    _expectedRevision: Revision,
-    _content: string,
-  ): Promise<ConditionalWriteResult> {
-    return Promise.resolve({ outcome: "unsupported" });
-  }
-
-  moveFile(
-    _lease: WriteLease,
-    _fileId: FileId,
-    _expectedRevision: Revision,
-    _sourceFolderId: FolderId,
-    _destinationFolderId: FolderId,
-  ): Promise<ConditionalWriteResult> {
-    return Promise.resolve({ outcome: "unsupported" });
-  }
 }
 
 async function issueLease(fill = 7) {
@@ -105,7 +64,7 @@ describe("GuardedDriveWritePort", () => {
     const { gate, lease } = await issueLease();
     const events: string[] = [];
     const writer = new GuardedDriveWritePort(gate, raw(events));
-    await writer.createFile(lease, folderId("root"), "new.md", "x");
+    await guardedCreateFile(writer, lease, folderId("root"), "new.md", "x");
     expect(events).toEqual(["raw-create"]);
   });
 
@@ -113,7 +72,13 @@ describe("GuardedDriveWritePort", () => {
     const { gate, lease } = await issueLease();
     const events: string[] = [];
     const writer = new GuardedDriveWritePort(gate, raw(events));
-    await writer.updateFile(lease, fileId("file"), revision('W/"same"'), "x");
+    await guardedUpdateFile(
+      writer,
+      lease,
+      fileId("file"),
+      revision('W/"same"'),
+      "x",
+    );
     expect(events).toEqual(["raw-update"]);
   });
 
@@ -123,7 +88,8 @@ describe("GuardedDriveWritePort", () => {
     const events: string[] = [];
     const writer = new GuardedDriveWritePort(gate, raw(events));
     await expect(
-      writer.moveFile(
+      guardedMoveFile(
+        writer,
         lease,
         fileId("file"),
         revision('"old"'),
@@ -138,7 +104,7 @@ describe("GuardedDriveWritePort", () => {
     const { lease } = await issueLease();
     const writer = new DisabledDriveWritePort();
     await expect(
-      writer.createFile(lease, folderId("root"), "new.md", "x"),
+      guardedCreateFile(writer, lease, folderId("root"), "new.md", "x"),
     ).resolves.toEqual({ outcome: "unsupported" });
   });
 
@@ -146,14 +112,25 @@ describe("GuardedDriveWritePort", () => {
     expect(() => new WriteLease("fabricated", Symbol("wrong"))).toThrow(
       TypeError,
     );
-    expect(() => new ExternalWriter()).toThrow(TypeError);
+    class GuardedSubclass extends GuardedDriveWritePort {}
+    expect(() => new GuardedSubclass({} as WriteGate, raw([]))).toThrow(
+      TypeError,
+    );
+    class DisabledSubclass extends DisabledDriveWritePort {}
+    expect(() => new DisabledSubclass()).toThrow(TypeError);
     const events: string[] = [];
     const writer = new GuardedDriveWritePort(
       { validateLease: () => ({ allowed: true }) } as unknown as WriteGate,
       raw(events),
     );
     await expect(
-      writer.createFile({} as WriteLease, folderId("root"), "new.md", "x"),
+      guardedCreateFile(
+        writer,
+        {} as WriteLease,
+        folderId("root"),
+        "new.md",
+        "x",
+      ),
     ).resolves.toEqual({ outcome: "unsupported" });
     expect(events).toEqual([]);
   });
@@ -163,7 +140,13 @@ describe("GuardedDriveWritePort", () => {
     const events: string[] = [];
     const forged = Object.create(gate) as WriteGate;
     const forgedWriter = new GuardedDriveWritePort(forged, raw(events));
-    await forgedWriter.createFile(lease, folderId("root"), "new.md", "x");
+    await guardedCreateFile(
+      forgedWriter,
+      lease,
+      folderId("root"),
+      "new.md",
+      "x",
+    );
     expect(events).toEqual([]);
 
     class OverrideGate extends WriteGate {
@@ -194,8 +177,47 @@ describe("GuardedDriveWritePort", () => {
     });
   });
 
-  it("does not recognize a prototype-forged writer capability", () => {
+  it("fails closed for prototype and Proxy forgeries", async () => {
     const forged = Object.setPrototypeOf({}, GuardedDriveWritePort.prototype);
-    expect(GuardedDriveWriter.isCapability(forged)).toBe(false);
+    expect(isGuardedDriveWriter(forged)).toBe(false);
+
+    const { gate, lease } = await issueLease();
+    const events: string[] = [];
+    const authentic = new GuardedDriveWritePort(gate, raw(events));
+    const proxied = new Proxy(authentic, {});
+    await expect(
+      guardedCreateFile(
+        forged as GuardedDriveWriter,
+        lease,
+        folderId("root"),
+        "new.md",
+        "x",
+      ),
+    ).resolves.toEqual({ outcome: "unsupported" });
+    await expect(
+      guardedCreateFile(
+        proxied as GuardedDriveWriter,
+        lease,
+        folderId("root"),
+        "new.md",
+        "x",
+      ),
+    ).resolves.toEqual({ outcome: "unsupported" });
+    expect(events).toEqual([]);
+  });
+
+  it("does not dispatch through replaced instance methods", async () => {
+    const { gate, lease } = await issueLease();
+    const events: string[] = [];
+    const writer = new GuardedDriveWritePort(gate, raw(events));
+    Object.assign(writer, {
+      createFile: () => {
+        events.push("replacement");
+        return Promise.resolve({ outcome: "unsupported" });
+      },
+    });
+
+    await guardedCreateFile(writer, lease, folderId("root"), "new.md", "x");
+    expect(events).toEqual(["raw-create"]);
   });
 });

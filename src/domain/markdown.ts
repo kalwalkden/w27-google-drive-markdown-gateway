@@ -112,23 +112,11 @@ export function assertWellFormedUtf16(value: string): void {
       "Markdown content must be UTF-8 text.",
     );
   }
-  for (let index = 0; index < value.length; index += 1) {
-    const unit = value.charCodeAt(index);
-    if (unit >= 0xd800 && unit <= 0xdbff) {
-      const following = value.charCodeAt(index + 1);
-      if (!(following >= 0xdc00 && following <= 0xdfff)) {
-        throw new MarkdownGatewayError(
-          "INVALID_CONTENT",
-          "Markdown content contains an unpaired UTF-16 surrogate.",
-        );
-      }
-      index += 1;
-    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
-      throw new MarkdownGatewayError(
-        "INVALID_CONTENT",
-        "Markdown content contains an unpaired UTF-16 surrogate.",
-      );
-    }
+  if (!isWellFormedUtf16(value)) {
+    throw new MarkdownGatewayError(
+      "INVALID_CONTENT",
+      "Markdown content contains an unpaired UTF-16 surrogate.",
+    );
   }
 }
 
@@ -136,6 +124,7 @@ export function assertWellFormedUtf16(value: string): void {
 export function parseRelativePath(path: string): readonly string[] {
   if (
     typeof path !== "string" ||
+    !isWellFormedUtf16(path) ||
     path.length === 0 ||
     path.startsWith("/") ||
     path.startsWith("\\") ||
@@ -176,6 +165,20 @@ export function parseRelativePath(path: string): readonly string[] {
     );
   }
   return segments;
+}
+
+function isWellFormedUtf16(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const following = value.charCodeAt(index + 1);
+      if (!(following >= 0xdc00 && following <= 0xdfff)) return false;
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export function canonicalRelativePath(segments: readonly string[]): string {

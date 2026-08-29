@@ -10,136 +10,108 @@ import type {
 } from "./drive-port.js";
 import type { FileId, FolderId, Revision } from "../domain/markdown.js";
 
-const writerConstructionKey = Symbol("guarded-drive-writer-construction-key");
-
-/**
- * Nominal application write capability. Only this module can compose one with
- * a real WriteGate, so a structural object cannot bypass lease validation.
- */
-export abstract class GuardedDriveWriter {
-  readonly #capabilityBrand = true;
-
-  protected constructor(key: symbol) {
-    if (key !== writerConstructionKey) {
-      throw new TypeError(
-        "GuardedDriveWriter cannot be constructed outside this module.",
-      );
-    }
-  }
-
-  static isCapability(value: unknown): value is GuardedDriveWriter {
-    if (!(value instanceof GuardedDriveWriter)) return false;
-    try {
-      return value.#capabilityBrand;
-    } catch {
-      return false;
-    }
-  }
-
-  abstract createFile(
-    lease: WriteLease,
-    parentId: FolderId,
-    name: string,
-    content: string,
-  ): Promise<CreateWriteResult>;
-  abstract updateFile(
-    lease: WriteLease,
-    fileId: FileId,
-    expectedRevision: Revision,
-    content: string,
-  ): Promise<ConditionalWriteResult>;
-  abstract moveFile(
-    lease: WriteLease,
-    fileId: FileId,
-    expectedRevision: Revision,
-    sourceFolderId: FolderId,
-    destinationFolderId: FolderId,
-  ): Promise<ConditionalWriteResult>;
+interface EnabledWriterState {
+  readonly kind: "enabled";
+  readonly gate: WriteGate;
+  readonly raw: RawDriveWritePort;
 }
+
+interface DisabledWriterState {
+  readonly kind: "disabled";
+}
+
+type WriterState = EnabledWriterState | DisabledWriterState;
+
+// This is the authority boundary. Instances carry no mutable or dispatchable
+// state; only an exact object key can retrieve its module-private state.
+const writerStates = new WeakMap<object, WriterState>();
+
+/** A module-authenticated writer capability accepted by MarkdownService. */
+export type GuardedDriveWriter = GuardedDriveWritePort | DisabledDriveWritePort;
 
 /**
  * Revalidates process-local authority at the last synchronous step before a
- * provider mutation. Evaluation belongs to operator-controlled composition.
+ * provider mutation. The constructor is final so an alternate state cannot be
+ * installed by a subclass.
  */
-export class GuardedDriveWritePort extends GuardedDriveWriter {
-  constructor(
-    private readonly gate: WriteGate,
-    private readonly raw: RawDriveWritePort,
-  ) {
-    super(writerConstructionKey);
-  }
-
-  createFile(
-    lease: WriteLease,
-    parentId: FolderId,
-    name: string,
-    content: string,
-  ): Promise<CreateWriteResult> {
-    if (!validateWriteLease(this.gate, lease).allowed)
-      return Promise.resolve({ outcome: "unsupported" });
-    return this.raw.createFile(parentId, name, content);
-  }
-
-  updateFile(
-    lease: WriteLease,
-    fileId: FileId,
-    expectedRevision: Revision,
-    content: string,
-  ): Promise<ConditionalWriteResult> {
-    if (!validateWriteLease(this.gate, lease).allowed)
-      return Promise.resolve({ outcome: "unsupported" });
-    return this.raw.updateFile(fileId, expectedRevision, content);
-  }
-
-  moveFile(
-    lease: WriteLease,
-    fileId: FileId,
-    expectedRevision: Revision,
-    sourceFolderId: FolderId,
-    destinationFolderId: FolderId,
-  ): Promise<ConditionalWriteResult> {
-    if (!validateWriteLease(this.gate, lease).allowed)
-      return Promise.resolve({ outcome: "unsupported" });
-    return this.raw.moveFile(
-      fileId,
-      expectedRevision,
-      sourceFolderId,
-      destinationFolderId,
-    );
+export class GuardedDriveWritePort {
+  constructor(gate: WriteGate, raw: RawDriveWritePort) {
+    if (new.target !== GuardedDriveWritePort) {
+      throw new TypeError("GuardedDriveWritePort cannot be subclassed.");
+    }
+    writerStates.set(this, { kind: "enabled", gate, raw });
   }
 }
 
 /** Safe default until deployment supplies evidence, trust, replay, and approval. */
-export class DisabledDriveWritePort extends GuardedDriveWriter {
+export class DisabledDriveWritePort {
   constructor() {
-    super(writerConstructionKey);
+    if (new.target !== DisabledDriveWritePort) {
+      throw new TypeError("DisabledDriveWritePort cannot be subclassed.");
+    }
+    writerStates.set(this, { kind: "disabled" });
   }
+}
 
-  createFile(
-    _lease: WriteLease,
-    _parentId: FolderId,
-    _name: string,
-    _content: string,
-  ): Promise<CreateWriteResult> {
+export function isGuardedDriveWriter(
+  value: unknown,
+): value is GuardedDriveWriter {
+  return typeof value === "object" && value !== null && writerStates.has(value);
+}
+
+export function guardedCreateFile(
+  writer: GuardedDriveWriter,
+  lease: WriteLease,
+  parentId: FolderId,
+  name: string,
+  content: string,
+): Promise<CreateWriteResult> {
+  const state = writerStates.get(writer);
+  if (!state || state.kind === "disabled") {
     return Promise.resolve({ outcome: "unsupported" });
   }
-
-  updateFile(
-    _lease: WriteLease,
-    _fileId: FileId,
-    _expectedRevision: Revision,
-    _content: string,
-  ): Promise<ConditionalWriteResult> {
+  if (!validateWriteLease(state.gate, lease).allowed) {
     return Promise.resolve({ outcome: "unsupported" });
   }
+  return state.raw.createFile(parentId, name, content);
+}
 
-  moveFile(
-    _lease: WriteLease,
-    _fileId: FileId,
-    _expectedRevision: Revision,
-    _sourceFolderId: FolderId,
-    _destinationFolderId: FolderId,
-  ): Promise<ConditionalWriteResult> {
+export function guardedUpdateFile(
+  writer: GuardedDriveWriter,
+  lease: WriteLease,
+  fileId: FileId,
+  expectedRevision: Revision,
+  content: string,
+): Promise<ConditionalWriteResult> {
+  const state = writerStates.get(writer);
+  if (!state || state.kind === "disabled") {
     return Promise.resolve({ outcome: "unsupported" });
   }
+  if (!validateWriteLease(state.gate, lease).allowed) {
+    return Promise.resolve({ outcome: "unsupported" });
+  }
+  return state.raw.updateFile(fileId, expectedRevision, content);
+}
+
+export function guardedMoveFile(
+  writer: GuardedDriveWriter,
+  lease: WriteLease,
+  fileId: FileId,
+  expectedRevision: Revision,
+  sourceFolderId: FolderId,
+  destinationFolderId: FolderId,
+): Promise<ConditionalWriteResult> {
+  const state = writerStates.get(writer);
+  if (!state || state.kind === "disabled") {
+    return Promise.resolve({ outcome: "unsupported" });
+  }
+  if (!validateWriteLease(state.gate, lease).allowed) {
+    return Promise.resolve({ outcome: "unsupported" });
+  }
+  return state.raw.moveFile(
+    fileId,
+    expectedRevision,
+    sourceFolderId,
+    destinationFolderId,
+  );
 }

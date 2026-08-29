@@ -232,3 +232,18 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - No secret value, cloud apply/deploy, credential lookup, live Drive, or external network call ran.
   Production composition intentionally supplies no write session.
 - Status: complete; independent task review pending
+
+## 2026-08-29 — Final security and deployment review repairs
+
+- Drive Core review found overridable concrete writer methods and ill-formed Unicode paths. Writer
+  dispatch now uses only module-private state and non-virtual functions; concrete classes are final,
+  and subclass/prototype/Proxy/method replacement attempts cannot reach a raw writer. All caller and
+  provider paths must be well-formed UTF-16.
+- API review found unsupported JSON charset/encoding errors were classified as internal failures;
+  both now return the stable redacted 415 outcome with one terminal audit event and no service call.
+- Cloud Run review repaired a fresh-project Artifact Registry bootstrap ordering error, secret-IAM
+  creation race, missing Terraform/runtime bound parity, and missing production-apply acknowledgement.
+- Validation: full combined `CI=true pnpm check` passed with 159 tests, plus diff and skill-integrity
+  checks. Terraform and Docker are unavailable locally and remain operator-only validations.
+- No live Drive, credential, cloud, provider, or external network operation ran.
+- Status: repaired; independent acceptance reruns pending

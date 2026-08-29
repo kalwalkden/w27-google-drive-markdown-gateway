@@ -158,6 +158,32 @@ describe("MarkdownService", () => {
     );
   });
 
+  it("rejects forged and proxied writer objects at the application boundary", () => {
+    const drive = new InMemoryDrivePort();
+    drive.addFixture({ id: "root", name: "root", kind: "folder" });
+    drive.addFixture({
+      id: "archive",
+      name: "archive",
+      kind: "folder",
+      parentIds: ["root"],
+    });
+    const config = {
+      rootFolderId: folderId("root"),
+      archiveFolderId: folderId("archive"),
+    };
+    const authentic = writerFrom(drive);
+    const forged = Object.setPrototypeOf({}, GuardedDriveWritePort.prototype);
+    const proxied = new Proxy(authentic, {});
+
+    expect(
+      () => new MarkdownService(drive, config, forged as GuardedDriveWritePort),
+    ).toThrow(MarkdownGatewayError);
+    expect(
+      () =>
+        new MarkdownService(drive, config, proxied as GuardedDriveWritePort),
+    ).toThrow(MarkdownGatewayError);
+  });
+
   it("lists, searches, and reads only verified direct-root Markdown files", async () => {
     const { drive, service } = fixture();
     expect(
@@ -489,14 +515,16 @@ describe("MarkdownService", () => {
       "folder\\name.md",
       "C:escape.md",
       "control\u0000name.md",
+      "unpaired-\ud800.md",
+      "unpaired-\udc00.md",
     ];
     for (const [index, name] of hostileNames.entries()) {
       drive.addFixture({
         id: `hostile-${index}`,
         name,
         kind: "file",
-        parentIds: ["docs"],
-        content: "release",
+        parentIds: ["root"],
+        content: "root release",
       });
       await expectCode(
         () => service.readMarkdown({ fileId: fileId(`hostile-${index}`) }),
