@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   fileId,
@@ -109,17 +109,12 @@ describe("GuardedDriveWritePort", () => {
     expect(events).toEqual(["raw-create"]);
   });
 
-  it("validates immediately before exactly one raw mutation", async () => {
+  it("dispatches exactly one raw mutation for an authentic lease", async () => {
     const { gate, lease } = await issueLease();
     const events: string[] = [];
-    const validate = gate.validateLease.bind(gate);
-    vi.spyOn(gate, "validateLease").mockImplementation((candidate) => {
-      events.push("validate");
-      return validate(candidate);
-    });
     const writer = new GuardedDriveWritePort(gate, raw(events));
     await writer.updateFile(lease, fileId("file"), revision('W/"same"'), "x");
-    expect(events).toEqual(["validate", "raw-update"]);
+    expect(events).toEqual(["raw-update"]);
   });
 
   it("denies fabricated or expired authority with no raw mutation", async () => {
@@ -152,13 +147,39 @@ describe("GuardedDriveWritePort", () => {
       TypeError,
     );
     expect(() => new ExternalWriter()).toThrow(TypeError);
-    expect(
-      () =>
-        new GuardedDriveWritePort(
-          { validateLease: () => ({ allowed: true }) } as unknown as WriteGate,
-          raw([]),
-        ),
-    ).toThrow(TypeError);
+    const events: string[] = [];
+    const writer = new GuardedDriveWritePort(
+      { validateLease: () => ({ allowed: true }) } as unknown as WriteGate,
+      raw(events),
+    );
+    await expect(
+      writer.createFile({} as WriteLease, folderId("root"), "new.md", "x"),
+    ).resolves.toEqual({ outcome: "unsupported" });
+    expect(events).toEqual([]);
+  });
+
+  it("denies a real-object prototype forgery and a subclass override", async () => {
+    const { gate, lease } = await issueLease();
+    const events: string[] = [];
+    const forged = Object.create(gate) as WriteGate;
+    const forgedWriter = new GuardedDriveWritePort(forged, raw(events));
+    await forgedWriter.createFile(lease, folderId("root"), "new.md", "x");
+    expect(events).toEqual([]);
+
+    class OverrideGate extends WriteGate {
+      validateLease(): ReturnType<WriteGate["validateLease"]> {
+        return {
+          allowed: true,
+          lease,
+          audit: {
+            event: "write-gate-evaluated",
+            decision: "allowed",
+            reason: "approved",
+          },
+        };
+      }
+    }
+    expect(() => new OverrideGate({} as never)).toThrow(TypeError);
   });
 
   it("denies a prototype-forged lease without throwing or dispatching", async () => {

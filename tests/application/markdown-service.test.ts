@@ -6,6 +6,8 @@ import {
   folderId,
   MarkdownGatewayError,
   revision,
+  type FolderId,
+  type Revision,
 } from "../../src/domain/markdown.js";
 import { InMemoryDrivePort } from "../../src/drive/in-memory-drive-port.js";
 import type {
@@ -122,6 +124,7 @@ function portFrom(
     getNode: drive.getNode.bind(drive),
     listChildren: drive.listChildren.bind(drive),
     listDescendants: drive.listDescendants.bind(drive),
+    searchDirectChildren: drive.searchDirectChildren.bind(drive),
     searchDescendants: drive.searchDescendants.bind(drive),
     readFile: drive.readFile.bind(drive),
     ...overrides,
@@ -155,28 +158,46 @@ describe("MarkdownService", () => {
     );
   });
 
-  it("lists, searches, and reads only verified Markdown files", async () => {
-    const { service } = fixture();
+  it("lists, searches, and reads only verified direct-root Markdown files", async () => {
+    const { drive, service } = fixture();
     expect(
-      (await service.listMarkdown({ path: "docs" })).map(
-        (file) => file.relativePath,
-      ),
-    ).toEqual(["docs/guide.md"]);
-    expect(
-      (await service.listMarkdown({ path: "docs", recursive: true })).map(
-        (file) => file.relativePath,
-      ),
-    ).toEqual(["docs/nested/child.MD", "docs/guide.md"]);
-    expect(await service.searchMarkdown({ query: "release" })).toMatchObject([
-      { relativePath: "docs/guide.md", excerpt: "hello release plan" },
+      (await service.listMarkdown()).map((file) => file.relativePath),
+    ).toEqual(["root-file.md"]);
+    expect(await service.searchMarkdown({ query: "root" })).toMatchObject([
+      { relativePath: "root-file.md", excerpt: "root content" },
     ]);
-    expect(await service.readMarkdown({ path: "docs/guide.md" })).toMatchObject(
-      {
-        fileId: fileId("guide"),
-        revision: revision("1"),
-        content: "hello release plan",
-      },
+    expect(await service.readMarkdown({ path: "root-file.md" })).toMatchObject({
+      fileId: fileId("root-file"),
+      revision: revision("1"),
+      content: "root content",
+    });
+    await expectCode(
+      () => service.readMarkdown({ path: "docs/guide.md" }),
+      "UNSUPPORTED",
     );
+    await expectCode(
+      () => service.listMarkdown({ recursive: true }),
+      "UNSUPPORTED",
+    );
+    await expectCode(
+      () => service.searchMarkdown({ query: "root", path: "docs" }),
+      "UNSUPPORTED",
+    );
+    const emojiContent = `${"x".repeat(20)}😀${"x".repeat(19)}needle`;
+    drive.addFixture({
+      id: "emoji",
+      name: "emoji.md",
+      kind: "file",
+      parentIds: ["root"],
+      content: emojiContent,
+    });
+    const [emojiHit] = await drive.searchDirectChildren(
+      folderId("root"),
+      "needle",
+      10,
+    );
+    expect(emojiHit?.excerpt?.startsWith("😀")).toBe(true);
+    expect(() => new TextEncoder().encode(emojiHit?.excerpt)).not.toThrow();
   });
 
   it("creates and conditionally updates direct-root files", async () => {
@@ -344,7 +365,7 @@ describe("MarkdownService", () => {
     });
     await expectCode(
       () => service.readMarkdown({ path: "docs/guide.md" }),
-      "AMBIGUOUS_PATH",
+      "UNSUPPORTED",
     );
 
     const second = fixture();
@@ -371,7 +392,7 @@ describe("MarkdownService", () => {
     );
     await expectCode(
       () => second.service.readMarkdown({ path: "docs/guide.md/child.md" }),
-      "NOT_FOUND",
+      "UNSUPPORTED",
     );
   });
 
@@ -451,15 +472,13 @@ describe("MarkdownService", () => {
       content: "release",
     });
     expect(
-      (await service.listMarkdown({ path: "docs", recursive: true })).map(
-        (entry) => entry.relativePath,
-      ),
-    ).toEqual(["docs/nested/child.MD", "docs/guide.md"]);
+      (await service.listMarkdown()).map((entry) => entry.relativePath),
+    ).toEqual(["root-file.md"]);
     expect(
       (await service.searchMarkdown({ query: "release" })).map(
         (entry) => entry.relativePath,
       ),
-    ).toEqual(["docs/guide.md"]);
+    ).toEqual([]);
   });
 
   it("rejects hostile provider names for ID reads and skips them in list/search", async () => {
@@ -485,15 +504,13 @@ describe("MarkdownService", () => {
       );
     }
     expect(
-      (await service.listMarkdown({ path: "docs", recursive: true })).map(
-        (entry) => entry.relativePath,
-      ),
-    ).toEqual(["docs/nested/child.MD", "docs/guide.md"]);
+      (await service.listMarkdown()).map((entry) => entry.relativePath),
+    ).toEqual(["root-file.md"]);
     expect(
       (await service.searchMarkdown({ query: "release" })).map(
         (entry) => entry.relativePath,
       ),
-    ).toEqual(["docs/guide.md"]);
+    ).toEqual([]);
   });
 
   it("rejects an unsafe provider-selected root name before an ID mutation", async () => {
@@ -584,44 +601,38 @@ describe("MarkdownService", () => {
     ).toThrow(MarkdownGatewayError);
   });
 
-  it("enforces direct depth and rejects duplicate canonical list/search results", async () => {
+  it("rejects recursive reads and duplicate direct-root results", async () => {
     const { drive } = fixture();
-    const directIgnoringPort = portFrom(drive, {
-      listDescendants: async () => [
-        ...(await drive.listDescendants(folderId("docs"), {
-          recursive: true,
-          limit: 10,
-        })),
-      ],
-    });
-    const directService = new MarkdownService(directIgnoringPort, {
+    const directService = new MarkdownService(portFrom(drive), {
       rootFolderId: folderId("root"),
       archiveFolderId: folderId("archive"),
       defaultSearchLimit: 5,
       maxSearchLimit: 10,
     });
-    expect(
-      (
-        await directService.listMarkdown({ path: "docs", recursive: false })
-      ).map((entry) => entry.relativePath),
-    ).toEqual(["docs/guide.md"]);
+    await expectCode(
+      () => directService.listMarkdown({ recursive: true }),
+      "UNSUPPORTED",
+    );
 
-    const guide = drive.inspect("guide") as DriveNode;
+    const guide = drive.inspect("root-file") as DriveNode;
     const duplicateListService = new MarkdownService(
-      portFrom(drive, { listDescendants: async () => [guide, guide] }),
+      portFrom(drive, { listChildren: async () => [guide, guide] }),
       { rootFolderId: folderId("root"), archiveFolderId: folderId("archive") },
     );
     await expectCode(
-      () => duplicateListService.listMarkdown({ recursive: true }),
+      () => duplicateListService.listMarkdown(),
       "AMBIGUOUS_PATH",
     );
 
     const duplicateSearchService = new MarkdownService(
       portFrom(drive, {
-        searchDescendants: async (): Promise<readonly DriveSearchHit[]> => [
+        searchDirectChildren: async (): Promise<readonly DriveSearchHit[]> => [
           { node: guide },
           { node: guide },
         ],
+        searchDescendants: async () => {
+          throw new Error("nested search must not be delegated");
+        },
       }),
       { rootFolderId: folderId("root"), archiveFolderId: folderId("archive") },
     );
@@ -631,13 +642,67 @@ describe("MarkdownService", () => {
     );
   });
 
+  it("does not inspect nested in-memory content during direct-child search", async () => {
+    class TrackingDrive extends InMemoryDrivePort {
+      readonly listedFolders: string[] = [];
+
+      override async listChildren(
+        folder: FolderId,
+      ): Promise<readonly DriveNode[]> {
+        this.listedFolders.push(folder);
+        return super.listChildren(folder);
+      }
+    }
+    const drive = new TrackingDrive();
+    drive.addFixture({ id: "root", name: "root", kind: "folder" });
+    drive.addFixture({
+      id: "docs",
+      name: "docs",
+      kind: "folder",
+      parentIds: ["root"],
+    });
+    drive.addFixture({
+      id: "nested",
+      name: "nested.md",
+      kind: "file",
+      parentIds: ["docs"],
+      content: "needle",
+    });
+
+    await expect(
+      drive.searchDirectChildren(folderId("root"), "needle", 10),
+    ).resolves.toEqual([]);
+    expect(drive.listedFolders).toEqual(["root"]);
+  });
+
+  it("does not expose an excerpt when its verified file facts change after transfer", async () => {
+    const { drive } = fixture();
+    const rootFile = drive.inspect("root-file") as DriveNode;
+    const service = new MarkdownService(
+      portFrom(drive, {
+        searchDirectChildren: async () => [
+          { node: rootFile, excerpt: "root content" },
+        ],
+        getNode: async (id) =>
+          id === fileId("root-file")
+            ? { ...rootFile, revision: revision("changed") }
+            : drive.getNode(id),
+      }),
+      { rootFolderId: folderId("root"), archiveFolderId: folderId("archive") },
+    );
+
+    await expect(service.searchMarkdown({ query: "root" })).resolves.toEqual(
+      [],
+    );
+  });
+
   it("rejects a read that races outside the root or returns inconsistent metadata/content", async () => {
     const { drive } = fixture();
-    const guide = drive.inspect("guide") as DriveNode;
+    const rootFile = drive.inspect("root-file") as DriveNode;
     const outsideOnRecheck = portFrom(drive, {
       getNode: async (id) =>
-        id === fileId("guide")
-          ? { ...guide, parentIds: [] }
+        id === fileId("root-file")
+          ? { ...rootFile, parentIds: [] }
           : drive.getNode(id),
     });
     const movedService = new MarkdownService(outsideOnRecheck, {
@@ -645,13 +710,13 @@ describe("MarkdownService", () => {
       archiveFolderId: folderId("archive"),
     });
     await expectCode(
-      () => movedService.readMarkdown({ path: "docs/guide.md" }),
+      () => movedService.readMarkdown({ path: "root-file.md" }),
       "OUTSIDE_ROOT",
     );
 
     const inconsistentPort = portFrom(drive, {
       readFile: async (): Promise<DriveRead> => ({
-        node: guide,
+        node: rootFile,
         content: "changed-but-size-is-not",
       }),
     });
@@ -660,7 +725,34 @@ describe("MarkdownService", () => {
       archiveFolderId: folderId("archive"),
     });
     await expectCode(
-      () => inconsistentService.readMarkdown({ path: "docs/guide.md" }),
+      () => inconsistentService.readMarkdown({ path: "root-file.md" }),
+      "UNSUPPORTED",
+    );
+
+    const movedOutAndBack = portFrom(drive, {
+      readFile: async (): Promise<DriveRead> => {
+        await drive.moveFile(
+          fileId("root-file"),
+          revision("1"),
+          folderId("root"),
+          folderId("docs"),
+        );
+        const moved = drive.inspect("root-file");
+        await drive.moveFile(
+          fileId("root-file"),
+          moved?.revision as Revision,
+          folderId("docs"),
+          folderId("root"),
+        );
+        return { node: rootFile, content: "root content" };
+      },
+    });
+    const movedOutAndBackService = new MarkdownService(movedOutAndBack, {
+      rootFolderId: folderId("root"),
+      archiveFolderId: folderId("archive"),
+    });
+    await expectCode(
+      () => movedOutAndBackService.readMarkdown({ path: "root-file.md" }),
       "UNSUPPORTED",
     );
   });
@@ -774,9 +866,7 @@ describe("MarkdownService", () => {
       "UNSUPPORTED",
     );
     expect(
-      (await service.listMarkdown({ path: "docs", recursive: true })).map(
-        (entry) => entry.relativePath,
-      ),
-    ).not.toContain("docs/bad.md");
+      (await service.listMarkdown()).map((entry) => entry.relativePath),
+    ).not.toContain("bad.md");
   });
 });

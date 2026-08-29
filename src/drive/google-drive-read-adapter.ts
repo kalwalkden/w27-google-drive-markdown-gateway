@@ -17,6 +17,15 @@ import {
   type GoogleDriveApi,
   type GoogleDriveAuthConfig,
 } from "./google-drive-auth.js";
+import {
+  DriveProviderError as GoogleDriveProviderError,
+  type DriveProviderOperation as ProviderOperation,
+} from "./provider-error.js";
+
+export {
+  DriveProviderError as GoogleDriveProviderError,
+  type DriveProviderFailure as GoogleDriveProviderFailure,
+} from "./provider-error.js";
 
 const folderMimeType = "application/vnd.google-apps.folder";
 const shortcutMimeType = "application/vnd.google-apps.shortcut";
@@ -27,33 +36,6 @@ const defaultMaxTraversalNodes = 1_000;
 const defaultMaxPages = 100;
 const defaultRootCacheTtlMs = 60_000;
 const notFound = Symbol("google-drive-not-found");
-
-type ProviderOperation =
-  | "root-validation"
-  | "get-metadata"
-  | "list-children"
-  | "read-media";
-
-export type GoogleDriveProviderFailure =
-  | "authentication"
-  | "not-found"
-  | "throttled"
-  | "transient"
-  | "malformed"
-  | "limit"
-  | "configuration";
-
-/** A deliberately redacted provider failure safe for future transport mapping. */
-export class GoogleDriveProviderError extends Error {
-  constructor(
-    readonly failure: GoogleDriveProviderFailure,
-    readonly operation: ProviderOperation,
-    readonly status?: number,
-  ) {
-    super(`Google Drive ${operation} failed: ${failure}.`);
-    this.name = "GoogleDriveProviderError";
-  }
-}
 
 export type GoogleDriveReadAdapterConfig = Readonly<{
   rootFolderId: FolderId;
@@ -198,7 +180,7 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
     return result;
   }
 
-  async searchDescendants(
+  async searchDirectChildren(
     folder: FolderId,
     query: string,
     limit: number,
@@ -211,10 +193,12 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
       limit > this.maxTraversalNodes
     )
       throw new GoogleDriveProviderError("configuration", "list-children");
-    const candidates = await this.listDescendants(folder, {
-      recursive: true,
-      limit: this.maxTraversalNodes,
-    });
+    // This legacy-shaped port method is intentionally limited to direct
+    // children. An ancestor chain has no Drive precondition that can bind a
+    // content download to the topology inspected before it.
+    if (folder !== this.config.rootFolderId)
+      throw new GoogleDriveProviderError("configuration", "list-children");
+    const candidates = await this.listChildren(folder);
     const needle = query.toLocaleLowerCase();
     const result: DriveSearchHit[] = [];
     for (const candidate of candidates) {
@@ -250,10 +234,19 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
     return result;
   }
 
+  async searchDescendants(
+    folder: FolderId,
+    query: string,
+    limit: number,
+  ): Promise<readonly DriveSearchHit[]> {
+    return this.searchDirectChildren(folder, query, limit);
+  }
+
   async readFile(id: FileId): Promise<DriveRead | undefined> {
     await this.ensureRoot();
     const node = await this.fetchMetadata(id, "get-metadata");
     if (!node) return undefined;
+    this.assertDirectRootChild(node);
     if (
       node.kind !== "file" ||
       node.size === undefined ||
@@ -283,7 +276,20 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
     } catch {
       throw new GoogleDriveProviderError("malformed", "read-media");
     }
-    return { node, content };
+    const after = await this.fetchMetadata(id, "get-metadata");
+    if (!after || !sameNodeFacts(node, after))
+      throw new GoogleDriveProviderError("malformed", "read-media");
+    this.assertDirectRootChild(after);
+    return { node: after, content };
+  }
+
+  private assertDirectRootChild(node: DriveNode): void {
+    if (
+      node.parentIds.length !== 1 ||
+      node.parentIds[0] !== this.config.rootFolderId
+    ) {
+      throw new GoogleDriveProviderError("configuration", "read-media");
+    }
   }
 
   private validateConfig(): void {
@@ -601,7 +607,57 @@ function excerptAround(
   index: number,
   queryLength: number,
 ): string {
-  return content.slice(Math.max(0, index - 20), index + queryLength + 20);
+  return sliceWellFormedUtf16(
+    content,
+    Math.max(0, index - 20),
+    index + queryLength + 20,
+  );
+}
+
+function sliceWellFormedUtf16(
+  value: string,
+  start: number,
+  end: number,
+): string {
+  let safeStart = Math.max(0, Math.min(start, value.length));
+  let safeEnd = Math.max(safeStart, Math.min(end, value.length));
+  if (
+    safeStart > 0 &&
+    isLowSurrogate(value.charCodeAt(safeStart)) &&
+    isHighSurrogate(value.charCodeAt(safeStart - 1))
+  ) {
+    safeStart -= 1;
+  }
+  if (
+    safeEnd < value.length &&
+    isHighSurrogate(value.charCodeAt(safeEnd - 1)) &&
+    isLowSurrogate(value.charCodeAt(safeEnd))
+  ) {
+    safeEnd += 1;
+  }
+  return value.slice(safeStart, safeEnd);
+}
+
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
+}
+
+function sameNodeFacts(left: DriveNode, right: DriveNode): boolean {
+  return (
+    left.id === right.id &&
+    left.name === right.name &&
+    left.kind === right.kind &&
+    left.mimeType === right.mimeType &&
+    left.revision === right.revision &&
+    left.size === right.size &&
+    left.modifiedTime === right.modifiedTime &&
+    left.parentIds.length === right.parentIds.length &&
+    left.parentIds.every((parent, index) => parent === right.parentIds[index])
+  );
 }
 
 function toBytes(value: unknown): Uint8Array {

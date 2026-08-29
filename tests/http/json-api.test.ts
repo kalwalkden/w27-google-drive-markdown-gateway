@@ -1,4 +1,5 @@
 import { once } from "node:events";
+import { request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 
 import { describe, expect, it } from "vitest";
@@ -14,7 +15,7 @@ import {
   MarkdownGatewayError,
   revision,
 } from "../../src/domain/markdown.js";
-import { GoogleDriveProviderError } from "../../src/drive/google-drive-read-adapter.js";
+import { DriveProviderError } from "../../src/drive/provider-error.js";
 import {
   createJsonApiApp,
   type JsonApiDependencies,
@@ -121,6 +122,58 @@ async function call(
   try {
     const address = server.address() as AddressInfo;
     return await fetch(`http://127.0.0.1:${address.port}${path}`, init);
+  } finally {
+    server.close();
+  }
+}
+
+async function callBeforeJsonBodyArrives(
+  dependencies: Omit<
+    JsonApiDependencies,
+    "config" | "principalVerifier" | "service"
+  > & {
+    readonly config?: ReturnType<typeof config>;
+    readonly principalVerifier?: PrincipalVerifier;
+    readonly service?: JsonApiDependencies["service"];
+  },
+  delayMs: number,
+): Promise<number> {
+  const app = createJsonApiApp({
+    config: dependencies.config ?? config(),
+    principalVerifier: dependencies.principalVerifier ?? verifier(),
+    service: dependencies.service ?? fakeService(),
+    operationId: () => "00000000-0000-4000-8000-000000000001",
+    auditLogger: dependencies.auditLogger ?? { info() {} },
+    ...dependencies,
+  });
+  const server = app.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const address = server.address() as AddressInfo;
+    return await new Promise((resolve, reject) => {
+      const request = httpRequest({
+        host: "127.0.0.1",
+        port: address.port,
+        path: "/v1/markdown/create",
+        method: "POST",
+        headers: {
+          ...authorized,
+          "Content-Type": "application/json",
+          "Transfer-Encoding": "chunked",
+        },
+      });
+      const bodyTimer = setTimeout(
+        () => request.end('{"path":"docs/new.md","content":"safe"}'),
+        delayMs,
+      );
+      request.once("error", reject);
+      request.once("response", (response) => {
+        clearTimeout(bodyTimer);
+        request.destroy();
+        resolve(response.statusCode ?? 0);
+      });
+      request.flushHeaders();
+    });
   } finally {
     server.close();
   }
@@ -446,7 +499,7 @@ describe("JSON API", () => {
         "UNSUPPORTED",
       ],
       [
-        new GoogleDriveProviderError("transient", "get-metadata"),
+        new DriveProviderError("transient", "get-metadata"),
         503,
         "UPSTREAM_UNAVAILABLE",
       ],
@@ -580,5 +633,184 @@ describe("JSON API", () => {
     expect(healthEvents).toEqual([]);
     expect(verifies).toBe(1);
     expect(sessions).toBe(0);
+  });
+
+  it("returns the intended response and releases once when the audit sink fails", async () => {
+    let auditCalls = 0;
+    let releases = 0;
+    const response = await call(
+      {
+        auditLogger: {
+          info() {
+            auditCalls += 1;
+            throw new Error("audit destination unavailable");
+          },
+        },
+        rateLimiter: {
+          reserve() {
+            return {
+              accepted: true,
+              release() {
+                releases += 1;
+              },
+            };
+          },
+        },
+      },
+      "/v1/markdown/list",
+      { headers: authorized },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true });
+    expect(auditCalls).toBe(1);
+    expect(releases).toBe(1);
+  });
+
+  it("applies the route deadline before verification and releases a reservation on timeout", async () => {
+    let reservations = 0;
+    let releases = 0;
+    const events: MarkdownApiAuditEvent[] = [];
+    const response = await call(
+      {
+        config: parseServiceConfig({
+          ...config(),
+          http: { ...config().http, requestTimeoutMs: 100 },
+        }),
+        auditLogger: { info: (event) => events.push(event) },
+        principalVerifier: {
+          async verify() {
+            return await new Promise(() => undefined);
+          },
+        },
+        rateLimiter: {
+          reserve() {
+            reservations += 1;
+            return {
+              accepted: true,
+              release() {
+                releases += 1;
+              },
+            };
+          },
+        },
+      },
+      "/v1/markdown/list",
+      { headers: authorized },
+    );
+    expect(response.status).toBe(504);
+    expect(await response.json()).toMatchObject({
+      error: { code: "REQUEST_TIMEOUT" },
+    });
+    expect(reservations).toBe(0);
+    expect(releases).toBe(0);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ result: "timeout" });
+  });
+
+  it("keeps the route deadline active while the JSON body is still arriving", async () => {
+    let releases = 0;
+    const events: MarkdownApiAuditEvent[] = [];
+    const status = await callBeforeJsonBodyArrives(
+      {
+        config: parseServiceConfig({
+          ...config(),
+          http: { ...config().http, requestTimeoutMs: 100 },
+        }),
+        auditLogger: { info: (event) => events.push(event) },
+        rateLimiter: {
+          reserve() {
+            return {
+              accepted: true,
+              release() {
+                releases += 1;
+              },
+            };
+          },
+        },
+      },
+      200,
+    );
+    expect(status).toBe(504);
+    expect(releases).toBe(1);
+    expect(events).toEqual([expect.objectContaining({ result: "timeout" })]);
+  });
+
+  it("does not classify a throwing write-session provider as invalid input", async () => {
+    const events: MarkdownApiAuditEvent[] = [];
+    const response = await call(
+      {
+        auditLogger: { info: (event) => events.push(event) },
+        writeSessionProvider: {
+          getWriteSession() {
+            throw new Error("provider failure");
+          },
+        },
+      },
+      "/v1/markdown/create",
+      {
+        method: "POST",
+        headers: { ...authorized, "Content-Type": "application/json" },
+        body: JSON.stringify({ path: "docs/new.md", content: "safe" }),
+      },
+    );
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      error: { code: "INTERNAL" },
+    });
+    expect(events).toEqual([expect.objectContaining({ result: "internal" })]);
+  });
+
+  it("rejects implicit methods and path aliases without reaching dependencies", async () => {
+    let verifies = 0;
+    const cases: ReadonlyArray<readonly [string, RequestInit]> = [
+      ["/v1/markdown/list", { method: "HEAD", headers: authorized }],
+      ["/v1/markdown/list", { method: "OPTIONS", headers: authorized }],
+      ["/v1/markdown/list/", { headers: authorized }],
+      ["/v1/markdown/list", { method: "POST", headers: authorized }],
+      ["/healthz/", {}],
+    ];
+    for (const [path, init] of cases) {
+      const response = await call(
+        {
+          principalVerifier: {
+            async verify() {
+              verifies += 1;
+              return verifier().verify("Bearer accepted");
+            },
+          },
+        },
+        path,
+        init,
+      );
+      expect(response.status).toBe(404);
+    }
+    expect(verifies).toBe(0);
+  });
+
+  it("omits hostile provider file IDs from audit events", async () => {
+    const events: MarkdownApiAuditEvent[] = [];
+    const hostileFileId = "x".repeat(700);
+    const response = await call(
+      {
+        auditLogger: { info: (event) => events.push(event) },
+        service: {
+          ...fakeService(),
+          async readMarkdown() {
+            return {
+              ...metadata,
+              fileId: fileId(hostileFileId),
+              content: "safe",
+            };
+          },
+        },
+      },
+      "/v1/markdown/read?fileId=guide-file",
+      { headers: authorized },
+    );
+    expect(response.status).toBe(200);
+    expect(events).toEqual([
+      expect.not.objectContaining({ fileId: expect.anything() }),
+    ]);
+    expect(JSON.stringify(events)).not.toContain(hostileFileId);
   });
 });

@@ -25,9 +25,10 @@ import {
   MarkdownGatewayError,
   revision,
 } from "../domain/markdown.js";
-import { GoogleDriveProviderError } from "../drive/google-drive-read-adapter.js";
+import { DriveProviderError } from "../drive/provider-error.js";
 import {
   type AuditLogger,
+  auditFileId,
   auditPrincipal,
   createPinoAuditLogger,
   type MarkdownApiAuditEvent,
@@ -68,6 +69,8 @@ interface RequestContext {
   readonly startedAt: number;
   principal?: AuthenticatedPrincipal;
   reservation?: RateLimitReservation;
+  deadlineTimer?: ReturnType<typeof setTimeout>;
+  reservationReleased: boolean;
   completed: boolean;
 }
 
@@ -275,7 +278,7 @@ function publicFailure(error: unknown): PublicFailure {
         );
     }
   }
-  if (error instanceof GoogleDriveProviderError)
+  if (error instanceof DriveProviderError)
     return failure(
       503,
       "UPSTREAM_UNAVAILABLE",
@@ -313,12 +316,25 @@ const oversizedResult = (): PublicFailure =>
     "result_limit_exceeded",
   );
 
+function isBodyParserInputError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const type = Reflect.get(error, "type");
+  return (
+    (type === "entity.parse.failed" ||
+      type === "entity.too.large" ||
+      type === "request.size.invalid") &&
+    typeof Reflect.get(error, "status") === "number"
+  );
+}
+
 /**
  * Builds the route-only API. It deliberately accepts a pre-issued write session rather than any
  * write-gate input; an HTTP timeout cannot cancel a dispatched Drive promise and never retries it.
  */
 export function createJsonApiApp(dependencies: JsonApiDependencies): Express {
   const app = express();
+  app.set("strict routing", true);
+  app.set("case sensitive routing", true);
   const { config, principalVerifier, service } = dependencies;
   const auditLogger = dependencies.auditLogger ?? createPinoAuditLogger();
   const now = dependencies.now ?? (() => performance.now());
@@ -333,6 +349,12 @@ export function createJsonApiApp(dependencies: JsonApiDependencies): Express {
     type: "application/json",
   });
 
+  const releaseReservation = (context: RequestContext): void => {
+    if (!context.reservation || context.reservationReleased) return;
+    context.reservationReleased = true;
+    context.reservation.release();
+  };
+
   const complete = (
     request: RequestWithContext,
     response: Response,
@@ -342,8 +364,32 @@ export function createJsonApiApp(dependencies: JsonApiDependencies): Express {
     options: Readonly<{ fileId?: string; resultCount?: number }> = {},
   ): void => {
     const context = request[requestContext];
-    if (!context || context.completed || response.headersSent) return;
+    if (!context || context.completed) return;
     context.completed = true;
+    if (context.deadlineTimer !== undefined)
+      clearTimeout(context.deadlineTimer);
+    const safeFileId = auditFileId(options.fileId);
+    const event: MarkdownApiAuditEvent = {
+      event: "markdown-api-request",
+      operationId: context.operationId,
+      operation: context.operation,
+      principal: auditPrincipal(context.principal),
+      result: outcome,
+      statusCode,
+      durationMs: Math.max(0, Math.round(now() - context.startedAt)),
+      ...(safeFileId === undefined ? {} : { fileId: safeFileId }),
+      ...(options.resultCount === undefined
+        ? {}
+        : { resultCount: options.resultCount }),
+    };
+    try {
+      auditLogger.info(event);
+    } catch {
+      // An unavailable audit sink cannot strand an already-classified API response.
+    } finally {
+      releaseReservation(context);
+    }
+    if (response.headersSent) return;
     response.set("Cache-Control", "no-store");
     response.type("application/json");
     if (statusCode === 401) response.set("WWW-Authenticate", "Bearer");
@@ -353,21 +399,6 @@ export function createJsonApiApp(dependencies: JsonApiDependencies): Express {
         String(context.reservation.retryAfterSeconds),
       );
     }
-    const event: MarkdownApiAuditEvent = {
-      event: "markdown-api-request",
-      operationId: context.operationId,
-      operation: context.operation,
-      principal: auditPrincipal(context.principal),
-      result: outcome,
-      statusCode,
-      durationMs: Math.max(0, Math.round(now() - context.startedAt)),
-      ...(options.fileId === undefined ? {} : { fileId: options.fileId }),
-      ...(options.resultCount === undefined
-        ? {}
-        : { resultCount: options.resultCount }),
-    };
-    auditLogger.info(event);
-    context.reservation?.release();
     response.status(statusCode).send(body);
   };
 
@@ -408,13 +439,18 @@ export function createJsonApiApp(dependencies: JsonApiDependencies): Express {
         operation,
         operationId: operationId(),
         startedAt: now(),
+        reservationReleased: false,
         completed: false,
       };
       request[requestContext] = context;
+      context.deadlineTimer = setTimeout(() => {
+        respondFailure(request, response, timedOut());
+      }, config.http.requestTimeoutMs);
       try {
         context.principal = await principalVerifier.verify(
           request.get("Authorization"),
         );
+        if (context.completed) return;
         const reservation = rateLimiter.reserve(context.principal, now());
         context.reservation = reservation;
         if (!reservation.accepted) {
@@ -425,6 +461,7 @@ export function createJsonApiApp(dependencies: JsonApiDependencies): Express {
           );
           return;
         }
+        if (context.completed) return;
         next();
       } catch (error) {
         // Authentication providers can carry bearer or JWT detail; only fixed public data is safe.
@@ -450,22 +487,9 @@ export function createJsonApiApp(dependencies: JsonApiDependencies): Express {
     work: () => Promise<SuccessResponse>,
   ): Promise<void> => {
     const context = request[requestContext];
-    if (!context) return;
-    const remainingMs = Math.floor(
-      config.http.requestTimeoutMs - (now() - context.startedAt),
-    );
-    if (remainingMs <= 0) {
-      respondFailure(request, response, timedOut());
-      return;
-    }
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (!context || context.completed) return;
     try {
-      const success = await Promise.race([
-        work(),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(timedOut()), remainingMs);
-        }),
-      ]);
+      const success = await work();
       if (
         success.resultCount !== undefined &&
         success.resultCount > config.http.maxResultItems
@@ -488,13 +512,7 @@ export function createJsonApiApp(dependencies: JsonApiDependencies): Express {
       });
     } catch (error) {
       // Domain/provider errors are classifications only; raw objects are never public data.
-      respondFailure(
-        request,
-        response,
-        isTimeoutFailure(error) ? timedOut() : publicFailure(error),
-      );
-    } finally {
-      if (timer !== undefined) clearTimeout(timer);
+      respondFailure(request, response, publicFailure(error));
     }
   };
 
@@ -514,6 +532,41 @@ export function createJsonApiApp(dependencies: JsonApiDependencies): Express {
   };
   const unavailableWrite = (): MarkdownWriteSession | undefined =>
     writeSessionProvider.getWriteSession();
+
+  const exactRoutes = new Set([
+    "GET /healthz",
+    "GET /v1/markdown/list",
+    "GET /v1/markdown/search",
+    "GET /v1/markdown/read",
+    "POST /v1/markdown/create",
+    "POST /v1/markdown/update",
+    "POST /v1/markdown/archive",
+  ]);
+  const knownPublicPaths = new Set(
+    [...exactRoutes].map((route) => route.slice(route.indexOf(" ") + 1)),
+  );
+
+  app.use((request, response, next) => {
+    if (exactRoutes.has(`${request.method} ${request.path}`)) return next();
+    if (
+      knownPublicPaths.has(request.path) ||
+      request.path.startsWith("/v1/markdown/") ||
+      request.path === "/healthz/"
+    ) {
+      response.set("Cache-Control", "no-store");
+      response
+        .type("application/json")
+        .status(404)
+        .send(
+          JSON.stringify({
+            ok: false,
+            error: { code: "NOT_FOUND", message: "Not found." },
+          }),
+        );
+      return;
+    }
+    return next();
+  });
 
   app.get("/healthz", (_request, response) => {
     response.set("Cache-Control", "no-store");
@@ -594,6 +647,7 @@ export function createJsonApiApp(dependencies: JsonApiDependencies): Express {
       requireJson,
       jsonParser,
       (request: RequestWithContext, response) => {
+        if (request[requestContext]?.completed) return;
         const input = parseBody(schema, request);
         if (!input) return respondFailure(request, response, invalidRequest());
         const session = unavailableWrite();
@@ -659,7 +713,13 @@ export function createJsonApiApp(dependencies: JsonApiDependencies): Express {
       _next: NextFunction,
     ) => {
       if (request[requestContext]) {
-        respondFailure(request, response, invalidRequest());
+        respondFailure(
+          request,
+          response,
+          isBodyParserInputError(_error)
+            ? invalidRequest()
+            : publicFailure(_error),
+        );
         return;
       }
       response.set("Cache-Control", "no-store");
@@ -676,13 +736,4 @@ export function createJsonApiApp(dependencies: JsonApiDependencies): Express {
   );
 
   return app;
-}
-
-function isTimeoutFailure(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "REQUEST_TIMEOUT"
-  );
 }

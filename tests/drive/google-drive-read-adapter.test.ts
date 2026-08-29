@@ -59,6 +59,7 @@ class FakeDriveApi implements GoogleDriveApi {
   readonly lists: Readonly<Record<string, unknown>>[] = [];
   readonly resources = new Map<string, Resource>();
   readonly media = new Map<string, Uint8Array>();
+  readonly etags = new Map<string, string>();
   nextPages = new Map<string, readonly Resource[][]>();
   error?: unknown;
 
@@ -72,7 +73,7 @@ class FakeDriveApi implements GoogleDriveApi {
       if (!resource) throw { response: { status: 404, data: "hidden" } };
       return {
         data: resource,
-        headers: new Headers({ etag: `"${id}-etag"` }),
+        headers: new Headers({ etag: this.etags.get(id) ?? `"${id}-etag"` }),
       };
     },
     list: async (request: Readonly<Record<string, unknown>>) => {
@@ -223,7 +224,7 @@ describe("GoogleDriveReadAdapter", () => {
       file("miss", "other.md", ["root"], "release body"),
     );
     api.media.set("miss", new TextEncoder().encode("release body"));
-    const results = await adapter(api).searchDescendants(
+    const results = await adapter(api).searchDirectChildren(
       folderId("root"),
       "release",
       10,
@@ -251,8 +252,8 @@ describe("GoogleDriveReadAdapter", () => {
       node: { revision: revision('"read-etag"'), size: 5 },
     });
     expect(api.gets.slice(-2).map((request) => request.alt)).toEqual([
-      undefined,
       "media",
+      undefined,
     ]);
 
     api.media.set("read", new Uint8Array([0xc3, 0x28]));
@@ -264,6 +265,41 @@ describe("GoogleDriveReadAdapter", () => {
     await expect(drive.getNode(fileId("read"))).rejects.toThrow(
       "Google Drive get-metadata failed: throttled.",
     );
+  });
+
+  it("rejects a file moved out and back during media transfer", async () => {
+    const api = new FakeDriveApi();
+    api.resources.set("root", folder("root", "root"));
+    api.resources.set("read", file("read", "read.md", ["root"], "hello"));
+    api.media.set("read", new TextEncoder().encode("hello"));
+    api.etags.set("read", '"before"');
+    const originalGet = api.files.get;
+    api.files.get = async (request) => {
+      const response = await originalGet(request);
+      if (request.alt === "media") api.etags.set("read", '"after"');
+      return response;
+    };
+
+    await expect(adapter(api).readFile(fileId("read"))).rejects.toMatchObject({
+      failure: "malformed",
+      operation: "read-media",
+    });
+  });
+
+  it("keeps bounded excerpts well-formed when their boundary meets a surrogate pair", async () => {
+    const api = new FakeDriveApi();
+    api.resources.set("root", folder("root", "root"));
+    const content = `${"x".repeat(20)}😀${"x".repeat(19)}needle`;
+    api.resources.set("read", file("read", "read.md", ["root"], content));
+    api.media.set("read", new TextEncoder().encode(content));
+
+    const [hit] = await adapter(api).searchDirectChildren(
+      folderId("root"),
+      "needle",
+      1,
+    );
+    expect(hit?.excerpt?.startsWith("😀")).toBe(true);
+    expect(() => new TextEncoder().encode(hit?.excerpt)).not.toThrow();
   });
 
   it("uses safe failures for malformed root and upstream responses", async () => {

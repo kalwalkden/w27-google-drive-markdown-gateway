@@ -31,24 +31,22 @@ export const maxEvidenceBytes = 1_000_000;
 export const maxCompactJwsBytes = 16_384;
 
 const leaseConstructionKey = Symbol("write-lease-construction-key");
+const leaseValues = new WeakMap<WriteLease, string>();
+const gateValidationStates = new WeakMap<
+  WriteGate,
+  Readonly<{ clock: Clock; leases: Map<string, LeaseRecord> }>
+>();
 
 /** Opaque process-local capability. It is never suitable for logs or durable storage. */
 export class WriteLease {
-  readonly #value: string;
-
   /** @internal Construction is rejected unless it originates in this module. */
   constructor(value: string, key: symbol) {
-    if (key !== leaseConstructionKey) {
+    if (new.target !== WriteLease || key !== leaseConstructionKey) {
       throw new TypeError(
         "WriteLease cannot be constructed outside WriteGate.",
       );
     }
-    this.#value = value;
-  }
-
-  /** @internal Used only by WriteGate to validate process-local capability identity. */
-  valueForGate(): string {
-    return this.#value;
+    leaseValues.set(this, value);
   }
 }
 
@@ -86,6 +84,52 @@ export interface WriteGateDependencies {
 
 interface LeaseRecord {
   readonly expiresAtMs: number;
+}
+
+function removeExpiredLeases(
+  state: {
+    readonly leases: Map<string, LeaseRecord>;
+  },
+  now: number,
+): void {
+  for (const [value, record] of state.leases) {
+    if (record.expiresAtMs <= now) state.leases.delete(value);
+  }
+}
+
+/**
+ * Non-virtual mutation-boundary validation. The private WeakMaps make both the
+ * gate and lease authentic only when this module constructed them.
+ */
+export function validateWriteLease(
+  gate: unknown,
+  lease: unknown,
+): WriteGateDecision {
+  const state = gateValidationStates.get(gate as WriteGate);
+  if (!state) return deny("lease-invalid");
+  let current: Date;
+  try {
+    current = state.clock.now();
+  } catch {
+    return deny("clock-invalid");
+  }
+  if (!(current instanceof Date) || !Number.isFinite(current.getTime()))
+    return deny("clock-invalid");
+  const now = current.getTime();
+  const value = leaseValues.get(lease as WriteLease);
+  if (!isLeaseValue(value)) return deny("lease-invalid");
+  const record = state.leases.get(value);
+  if (!record) return deny("lease-invalid");
+  if (record.expiresAtMs <= now) {
+    state.leases.delete(value);
+    return deny("lease-expired");
+  }
+  removeExpiredLeases(state, now);
+  return {
+    allowed: true,
+    lease: lease as WriteLease,
+    audit: allowedAudit(),
+  };
 }
 
 function deny(reason: WriteGateDenialReason): WriteGateDecision {
@@ -193,9 +237,13 @@ export class WriteGate {
   private readonly leases = new Map<string, LeaseRecord>();
 
   constructor(private readonly dependencies: WriteGateDependencies) {
+    if (new.target !== WriteGate) {
+      throw new TypeError("WriteGate cannot be subclassed.");
+    }
     this.clock = dependencies.clock ?? systemClock;
     this.verifier = dependencies.verifier ?? new Ed25519CompactJwsVerifier();
     this.random = dependencies.randomBytes ?? randomBytes;
+    gateValidationStates.set(this, { clock: this.clock, leases: this.leases });
   }
 
   async evaluate(input: WriteGateInput): Promise<WriteGateDecision> {
@@ -295,7 +343,7 @@ export class WriteGate {
     const leaseValue = Buffer.from(material).toString("base64url");
     if (!isLeaseValue(leaseValue)) return deny("lease-generation-failed");
     const lease = issueLease(leaseValue);
-    this.removeExpiredLeases(now.getTime());
+    removeExpiredLeases({ leases: this.leases }, now.getTime());
     this.leases.set(leaseValue, {
       expiresAtMs: leaseExpiresAtMs,
     });
@@ -304,31 +352,7 @@ export class WriteGate {
 
   /** Future mutation boundaries call this immediately before sending a Drive request. */
   validateLease(lease: WriteLease): WriteGateDecision {
-    const current = this.sampleClock();
-    if (!current) return deny("clock-invalid");
-    const now = current.getTime();
-    if (!(lease instanceof WriteLease)) return deny("lease-invalid");
-    let value: string;
-    try {
-      value = lease.valueForGate();
-    } catch {
-      return deny("lease-invalid");
-    }
-    if (!isLeaseValue(value)) return deny("lease-invalid");
-    const record = this.leases.get(value);
-    if (!record) return deny("lease-invalid");
-    if (record.expiresAtMs <= now) {
-      this.leases.delete(value);
-      return deny("lease-expired");
-    }
-    this.removeExpiredLeases(now);
-    return { allowed: true, lease, audit: allowedAudit() };
-  }
-
-  private removeExpiredLeases(now: number): void {
-    for (const [value, record] of this.leases) {
-      if (record.expiresAtMs <= now) this.leases.delete(value);
-    }
+    return validateWriteLease(this, lease);
   }
 
   private sampleClock(): Date | undefined {

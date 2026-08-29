@@ -204,3 +204,19 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - Validation: 76 focused tests and full combined `CI=true pnpm check` passed with 131 tests, plus
   diff checking. No live Drive, credential, or network operation ran.
 - Status: repaired; independent feature-review rerun pending
+
+## 2026-08-29 — Drive Core and authenticated API adversarial repair round
+
+- Independent reviewers: `gpt-5.6-sol`, high reasoning, fresh read-only contexts. Both Drive Core
+  and the JSON API remained `Not ready` after targeted concurrency, capability-forgery, timeout,
+  routing, logging, and import-boundary fault injection.
+- Drive repair: gate/lease validation now uses module-private non-virtual state; public metadata and
+  content operations are direct-root only; nested/recursive access fails closed until Drive can
+  prove ancestor topology atomically. Direct media reads compare exact node facts before/after
+  transfer, direct search cannot inspect nested content, and excerpts preserve surrogate pairs.
+- API repair: the deadline now covers authentication through response, audit failures cannot retain
+  limiter slots, unknown failures map to 500, only exact route/method pairs are accepted, audit file
+  IDs are bounded, and provider errors moved to a transport-neutral module.
+- Validation: full combined `CI=true pnpm check` passed with 151 tests, plus diff and skill-integrity
+  checks. No live Drive, credential, cloud, or external network operation ran.
+- Status: repaired; final independent reruns pending

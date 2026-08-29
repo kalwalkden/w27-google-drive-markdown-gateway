@@ -5,8 +5,8 @@
 Implement the real, read-only Google Drive adapter behind the domain/application boundary. It must use
 `googleapis` and `google-auth-library`, support Shared Drive ADC and injected My Drive OAuth
 refresh-token credentials, validate/cache the configured root folder ID, and implement the
-finalized port's metadata lookup, direct-child listing, descendant listing/search, and Markdown
-content read operations.
+finalized port's metadata lookup, direct-child listing, and bounded Markdown content read
+operations.
 
 It has no HTTP/MCP/CLI endpoint, no secret provisioning, no Drive create/update/archive call, and
 no production write enablement. Until task 003 proves a precondition mechanism, every write-port
@@ -19,7 +19,7 @@ method returns the finalized contract's `unsupported` result without network I/O
 | `MarkdownService` owns policy. | Implement the finalized `DrivePort`; do not duplicate path parsing, Markdown filtering, relative-path construction, locator authorization, or public errors. | Feature/task brief; task 001 |
 | Reads only. | Production code may call only `files.get` and `files.list`. Write-port methods make no Google request. | Task brief; Epic 0 capability gate |
 | Root is an ID. | Require the configured opaque root ID; fetch/validate it using a concurrency-safe cached promise. Never resolve a root by name/path. | Task brief; handoff |
-| No broadened Drive query. | Enumerate direct children only with an exact parent predicate; search/list descendants recursively from the verified root. Do not use global `fullText`, `name`, `allDrives`, or user-wide search. | Task brief; handoff; Drive query docs |
+| No atomic ancestor precondition. | Public list, search, and content reads are limited to direct children of the configured root. Recursive/nested operations fail closed. A media read re-fetches exact node facts, including raw ETag/revision and parent, after download before returning content/excerpts. | Independent rereview; Drive API constraints |
 | Separate Google modes. | ADC uses `GoogleAuth`; refresh mode constructs `OAuth2Client` from injected secret values. Shared Drive root must have `driveId`; My Drive root must not. | Feature constraints; Google docs |
 | Secrets remain external. | The composition root injects refresh credentials. No environment/repository secret loading, no logging/stringifying of credentials, access tokens, raw Google errors, or content. | `AGENTS.md`; task brief |
 | Shortcuts/ambiguity fail closed. | Map shortcut MIME type to `shortcut`, never dereference its target, and retain all direct children so the service can reject duplicates. | Task 001 contract; feature |
@@ -111,19 +111,22 @@ Always set `supportsAllDrives: true`. For Shared Drive set `corpora: "drive"`, v
 to completion under explicit directory/traversal caps. If a cap or page continuation is exceeded,
 fail rather than hide a duplicate through a partial listing.
 
-Implement `listDescendants` by bounded traversal of direct children from the supplied folder.
-Honor finalized recursive/limit semantics, retain folders/non-Markdown nodes for the service, and
-never recurse into shortcuts.
+`listDescendants` remains available for provider diagnostics, but the application never exposes it
+for public recursive reads because no Drive precondition binds an ancestor chain to a later media
+download.
 
-Implement `searchDescendants` with the same rooted traversal. Do not use Drive
-`fullText contains`; it is not descendant-scoped. Safest default is bounded, case-insensitive
-name matching. If the finalized port requires content/excerpts, fetch only already-enumerated
-candidate files, apply the same byte/UTF-8 limits, and return bounded excerpts with no logs.
+`searchDirectChildren` is the public read contract and enumerates direct children only;
+`searchDescendants` is compatibility-only and retains the same direct-child behavior. Do not use
+Drive `fullText contains`; it is not descendant-scoped. Bounded content/excerpt matching
+downloads only direct-root Markdown files through the verified media-read path, applies the same
+byte/UTF-8 limits, and returns surrogate-safe excerpts with no logs.
 Never silently claim a complete search after truncation.
 
 ### 5. Content reads and unavailable writes
 
-`readFile(fileId)` gets/validates metadata first. Reject folders, shortcuts, trashed items,
+`readFile(fileId)` gets/validates metadata first and requires exactly the configured root as its
+sole parent. It re-fetches exact metadata after media transfer and rejects any changed ID, name,
+kind, parent, MIME type, size, modified time, or raw ETag. Reject folders, shortcuts, trashed items,
 missing/non-numeric/over-limit size, and absent revision before requesting media. For valid literal
 Drive content call `files.get({ fileId, alt: "media", responseType: "arraybuffer",
 supportsAllDrives: true })`; bound actual byte length and decode with

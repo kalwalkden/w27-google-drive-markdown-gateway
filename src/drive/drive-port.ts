@@ -31,6 +31,17 @@ export interface DriveReadPort {
     folderId: FolderId,
     options: Readonly<{ recursive: boolean; limit: number }>,
   ): Promise<readonly DriveNode[]>;
+  /**
+   * Bounded search over direct children only. Implementations must not inspect
+   * nested content before returning a hit, because ancestor topology cannot be
+   * bound to a later content read.
+   */
+  searchDirectChildren(
+    folderId: FolderId,
+    query: string,
+    limit: number,
+  ): Promise<readonly DriveSearchHit[]>;
+  /** @deprecated Diagnostics-only compatibility method; it must retain direct-child semantics. */
   searchDescendants(
     folderId: FolderId,
     query: string,

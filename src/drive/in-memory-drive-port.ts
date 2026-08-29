@@ -106,15 +106,12 @@ export class InMemoryDrivePort implements DriveReadPort, RawDriveWritePort {
     return result;
   }
 
-  async searchDescendants(
+  async searchDirectChildren(
     folder: FolderId,
     query: string,
     limit: number,
   ): Promise<readonly DriveSearchHit[]> {
-    const candidates = await this.listDescendants(folder, {
-      recursive: true,
-      limit: Number.MAX_SAFE_INTEGER,
-    });
+    const candidates = await this.listChildren(folder);
     const needle = query.toLowerCase();
     return candidates
       .filter((node) => {
@@ -132,13 +129,20 @@ export class InMemoryDrivePort implements DriveReadPort, RawDriveWritePort {
           node,
           excerpt:
             index >= 0
-              ? content?.slice(
-                  Math.max(0, index - 20),
-                  index + query.length + 20,
-                )
+              ? content === undefined
+                ? undefined
+                : excerptAround(content, index, query.length)
               : undefined,
         };
       });
+  }
+
+  async searchDescendants(
+    folder: FolderId,
+    query: string,
+    limit: number,
+  ): Promise<readonly DriveSearchHit[]> {
+    return this.searchDirectChildren(folder, query, limit);
   }
 
   async readFile(id: FileId): Promise<DriveRead | undefined> {
@@ -234,4 +238,36 @@ export class InMemoryDrivePort implements DriveReadPort, RawDriveWritePort {
       mimeType: node.mimeType,
     });
   }
+}
+
+function excerptAround(
+  content: string,
+  index: number,
+  queryLength: number,
+): string {
+  let start = Math.max(0, index - 20);
+  let end = Math.min(content.length, index + queryLength + 20);
+  if (
+    start > 0 &&
+    isLowSurrogate(content.charCodeAt(start)) &&
+    isHighSurrogate(content.charCodeAt(start - 1))
+  ) {
+    start -= 1;
+  }
+  if (
+    end < content.length &&
+    isHighSurrogate(content.charCodeAt(end - 1)) &&
+    isLowSurrogate(content.charCodeAt(end))
+  ) {
+    end += 1;
+  }
+  return content.slice(start, end);
+}
+
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
 }

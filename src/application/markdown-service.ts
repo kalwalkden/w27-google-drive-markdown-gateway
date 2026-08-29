@@ -130,24 +130,13 @@ export class MarkdownService {
         "Recursive listing must be a boolean.",
       );
     }
-    const folder = await this.resolveFolderInput(input.path);
-    const candidates = await this.port.listDescendants(
-      folder.node.id as FolderId,
-      {
-        recursive,
-        limit: this.maxSearchLimit,
-      },
-    );
+    this.requireDirectRootRead(input.path, recursive);
+    const candidates = await this.port.listChildren(this.config.rootFolderId);
     const result: MarkdownFileMetadata[] = [];
     const paths = new Set<string>();
     for (const candidate of candidates) {
       const metadata = await this.safeMetadata(candidate);
-      if (
-        metadata &&
-        (recursive
-          ? this.isBelow(metadata.relativePath, folder.segments)
-          : this.isDirectlyBelow(metadata.relativePath, folder.segments))
-      ) {
+      if (metadata && this.isDirectlyBelow(metadata.relativePath, [])) {
         this.assertUniquePath(paths, metadata.relativePath);
         result.push(metadata);
       }
@@ -175,9 +164,9 @@ export class MarkdownService {
         "Search limit is outside the configured bound.",
       );
     }
-    const folder = await this.resolveFolderInput(input.path);
-    const hits = await this.port.searchDescendants(
-      folder.node.id as FolderId,
+    this.requireDirectRootRead(input.path, false);
+    const hits = await this.port.searchDirectChildren(
+      this.config.rootFolderId,
       input.query,
       limit,
     );
@@ -185,7 +174,7 @@ export class MarkdownService {
     const paths = new Set<string>();
     for (const hit of hits) {
       const metadata = await this.safeMetadata(hit.node);
-      if (metadata && this.isBelow(metadata.relativePath, folder.segments)) {
+      if (metadata && this.isDirectlyBelow(metadata.relativePath, [])) {
         this.assertUniquePath(paths, metadata.relativePath);
         result.push({
           ...metadata,
@@ -197,7 +186,12 @@ export class MarkdownService {
   }
 
   async readMarkdown(locator: ReadMarkdownInput): Promise<ReadMarkdownResult> {
+    if ("path" in locator && locator.path !== undefined) {
+      const segments = requireMarkdownPath(locator.path);
+      if (segments.length !== 1) this.throwNestedReadUnavailable();
+    }
     const resolved = await this.resolveFile(locator);
+    this.assertDirectRootFile(resolved);
     const read = await this.port.readFile(resolved.node.id as FileId);
     if (!read)
       throw new MarkdownGatewayError(
@@ -208,7 +202,11 @@ export class MarkdownService {
       resolved.node.id as FileId,
       "file",
     );
-    if (!this.sameNodeFacts(read.node, current.node)) {
+    this.assertDirectRootFile(current);
+    if (
+      !this.sameNodeFacts(read.node, resolved.node) ||
+      !this.sameNodeFacts(read.node, current.node)
+    ) {
       throw new MarkdownGatewayError(
         "UNSUPPORTED",
         "Drive port returned a different file than requested.",
@@ -301,13 +299,33 @@ export class MarkdownService {
     );
   }
 
-  private async resolveFolderInput(
+  /**
+   * Drive exposes no conditional assertion over a mutable ancestor chain.
+   * Read APIs therefore expose only direct root children, whose parent fact is
+   * bound by the file revision checked around content transfer by the adapter.
+   */
+  private requireDirectRootRead(
     path: string | undefined,
-  ): Promise<ResolvedNode> {
-    return this.resolveSegments(
-      path === undefined ? [] : parseRelativePath(path),
-      true,
+    recursive: boolean,
+  ): void {
+    if (path !== undefined || recursive) this.throwNestedReadUnavailable();
+  }
+
+  private throwNestedReadUnavailable(): never {
+    throw new MarkdownGatewayError(
+      "UNSUPPORTED",
+      "Nested or recursive reads are unavailable without atomic topology proof.",
     );
+  }
+
+  private assertDirectRootFile(resolved: ResolvedNode): void {
+    if (
+      resolved.segments.length !== 1 ||
+      resolved.node.parentIds.length !== 1 ||
+      resolved.node.parentIds[0] !== this.config.rootFolderId
+    ) {
+      this.throwNestedReadUnavailable();
+    }
   }
 
   private async resolveFile(locator: FileLocator): Promise<ResolvedNode> {
@@ -478,6 +496,7 @@ export class MarkdownService {
   ): Promise<MarkdownFileMetadata | undefined> {
     try {
       const resolved = await this.resolveVerifiedNode(node.id, "file");
+      if (!this.sameNodeFacts(node, resolved.node)) return undefined;
       this.assertRegularMarkdown(resolved.node);
       if (
         resolved.node.size === undefined ||

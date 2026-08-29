@@ -92,6 +92,11 @@ function isSafeAuditString(value: string): boolean {
   );
 }
 
+/** Returns an opaque file ID only when it is safe for the bounded audit schema. */
+export function auditFileId(value: string | undefined): string | undefined {
+  return value !== undefined && isSafeAuditString(value) ? value : undefined;
+}
+
 /** Converts only already-normalized principal facts into an audit-safe identity. */
 export function auditPrincipal(
   principal: AuthenticatedPrincipal | undefined,

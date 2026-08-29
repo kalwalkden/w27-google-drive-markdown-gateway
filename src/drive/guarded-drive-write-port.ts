@@ -1,4 +1,8 @@
-import { WriteGate, type WriteLease } from "../write-gate/gate.js";
+import {
+  type WriteGate,
+  type WriteLease,
+  validateWriteLease,
+} from "../write-gate/gate.js";
 import type {
   ConditionalWriteResult,
   CreateWriteResult,
@@ -63,9 +67,6 @@ export class GuardedDriveWritePort extends GuardedDriveWriter {
     private readonly raw: RawDriveWritePort,
   ) {
     super(writerConstructionKey);
-    if (!(gate instanceof WriteGate)) {
-      throw new TypeError("GuardedDriveWritePort requires a WriteGate.");
-    }
   }
 
   createFile(
@@ -74,7 +75,7 @@ export class GuardedDriveWritePort extends GuardedDriveWriter {
     name: string,
     content: string,
   ): Promise<CreateWriteResult> {
-    if (!this.gate.validateLease(lease).allowed)
+    if (!validateWriteLease(this.gate, lease).allowed)
       return Promise.resolve({ outcome: "unsupported" });
     return this.raw.createFile(parentId, name, content);
   }
@@ -85,7 +86,7 @@ export class GuardedDriveWritePort extends GuardedDriveWriter {
     expectedRevision: Revision,
     content: string,
   ): Promise<ConditionalWriteResult> {
-    if (!this.gate.validateLease(lease).allowed)
+    if (!validateWriteLease(this.gate, lease).allowed)
       return Promise.resolve({ outcome: "unsupported" });
     return this.raw.updateFile(fileId, expectedRevision, content);
   }
@@ -97,7 +98,7 @@ export class GuardedDriveWritePort extends GuardedDriveWriter {
     sourceFolderId: FolderId,
     destinationFolderId: FolderId,
   ): Promise<ConditionalWriteResult> {
-    if (!this.gate.validateLease(lease).allowed)
+    if (!validateWriteLease(this.gate, lease).allowed)
       return Promise.resolve({ outcome: "unsupported" });
     return this.raw.moveFile(
       fileId,
