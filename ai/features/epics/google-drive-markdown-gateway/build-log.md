@@ -29,4 +29,28 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - Local task review: `No findings.`
 - Residual: validation ran on Node 26.7.0; the declared Node 24 target remains to be exercised by the
   container/deployment task.
+- Status: complete
+- Commit: `faf3644` (`build typescript service baseline`)
+
+## 2026-08-29 — 00-platform-validation / 002-live-drive-capability-harness
+
+- Spec shaping: `gpt-5.6-sol`, high reasoning because the task tests atomic stale-write behavior.
+- Implementation and bounded repair: `gpt-5.6-terra`, high reasoning.
+- Root task review found and repaired transient-result classification, cleanup identity/fallback,
+  evidence strictness, repository containment, metadata validation, and missing unsafe-case tests.
+- Validation:
+  - `CI=true pnpm install --frozen-lockfile` — passed
+  - `CI=true pnpm check` — passed; 17 fake-only tests
+  - `git diff --check` — passed
+  - credential-pattern scan — passed
+- Local task review: `No findings` after two repair passes.
+- No live Drive request was made. Production writes remain disabled until an operator runs the
+  documented probe against dedicated marked folders and obtains a supported, cleaned-up result.
 - Status: complete; commit pending
+
+## 2026-08-29 — specifications shaped ahead of implementation
+
+- `00-platform-validation / 003-client-validation-and-write-gate`: `gpt-5.6-terra`, medium
+  reasoning; implementation intentionally waits for the committed task-002 evidence contract.
+- `01-drive-core / 001-domain-contracts-and-safe-resolution`: `gpt-5.6-terra`, medium reasoning;
+  pure contracts and fake-only tests need no premium model.

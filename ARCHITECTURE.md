@@ -35,6 +35,8 @@
 - Product type-check: `pnpm typecheck`.
 - Product tests: `pnpm test`.
 - Product build: `pnpm build`.
+- Opt-in live Drive safety probe: `pnpm drive:probe -- run --config <external-config> --output
+  <external-result> --confirm W27_DRIVE_TEST_ONLY`; see `docs/live-drive-capability-harness.md`.
 - Aggregate validation: `pnpm check`.
 
 ## Project structure hotspots
