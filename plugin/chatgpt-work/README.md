@@ -34,12 +34,12 @@ Reject endpoints with credentials, query strings, or fragments.
    private-plugin metadata, user consent, and validation evidence never issue a
    deployment write authority or bypass its default-disabled boundary.
 
-The current production composition deliberately supplies no write session.
-`create_markdown`, `update_markdown`, and `archive_markdown` therefore each
-return `UNSUPPORTED`; a Work package must record that result as expected and
-must not attempt a workaround. Archive success remains blocked until a future,
-separately approved production write composition can atomically prove the
-destination topology.
+The local/default deployment composition is read-only. An absent or false
+deployment write mode returns `UNSUPPORTED`; a Work package must not attempt a
+workaround. A reviewed controlled revision may enable the server-side writer
+only after dedicated-tree capability evidence, a reviewed Terraform plan with
+both write acknowledgements, and exact immutable image/config evidence. A Work
+record is release evidence only and never runtime authority.
 
 Read [instructions.md](instructions.md) into the selected platform's supported
 instruction field only after its format is verified. Do not add tools, direct

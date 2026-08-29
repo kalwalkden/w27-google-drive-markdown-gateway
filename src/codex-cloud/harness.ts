@@ -5,11 +5,15 @@ import { basename, join } from "node:path";
 import { z } from "zod";
 
 export const confirmation = "W27_CODEX_CLOUD_TEST_ONLY";
-
 const gatewayFailures = {
   UNAUTHENTICATED: [401, 6, "Authentication failed."],
   UNSUPPORTED: [503, 7, "Operation is unavailable."],
   CONFLICT: [409, 8, "Markdown revision conflict."],
+  OUTCOME_UNKNOWN: [
+    503,
+    9,
+    "Mutation outcome is unknown. Read the document again before any further mutation.",
+  ],
 } as const;
 const clientFailures = {
   USAGE: [2, "Command usage is invalid."],
@@ -21,21 +25,41 @@ type GatewayFailureCode = keyof typeof gatewayFailures;
 type ClientFailureCode = keyof typeof clientFailures;
 type ResultCode =
   | "OK"
-  | "BLOCKED"
   | "NOT_ATTEMPTED"
   | GatewayFailureCode
   | ClientFailureCode
   | "MISMATCH"
-  | "ARCHIVE_UNVERIFIED"
-  | "FAILED";
+  | "ARCHIVE_UNVERIFIED";
 
+const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
+const relativeFolder = (nested: boolean) =>
+  z.string().superRefine((value, context) => {
+    const segments = value.split("/");
+    if (
+      value.length > 512 ||
+      (nested && segments.length < 2) ||
+      segments.some(
+        (segment) =>
+          segment === "." ||
+          segment === ".." ||
+          !/^[A-Za-z0-9._-]{1,128}$/u.test(segment),
+      )
+    )
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "folder" });
+  });
+const folderOverlaps = (left: string, right: string) =>
+  left === right ||
+  left.startsWith(`${right}/`) ||
+  right.startsWith(`${left}/`);
 const platformControlSchema = z.enum(["verified", "unavailable"]);
 export const cloudHarnessConfigSchema = z
   .object({
     cliExecutable: z.literal("md-drive"),
-    validationFolder: z.string().regex(/^[A-Za-z0-9._-]{1,128}$/u),
-    archiveFolder: z.string().regex(/^[A-Za-z0-9._-]{1,128}$/u),
-    releaseDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+    validationFolder: relativeFolder(true),
+    archiveFolder: relativeFolder(false),
+    gatewayImageDigest: digest,
+    runtimeConfigDigest: digest,
+    liveCapabilityEvidenceDigest: digest,
     environmentIdentifier: z.string().regex(/^example-[A-Za-z0-9-]{1,120}$/u),
     gatewayHostnameIdentifier: z
       .string()
@@ -50,7 +74,15 @@ export const cloudHarnessConfigSchema = z
       })
       .strict(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (folderOverlaps(value.validationFolder, value.archiveFolder))
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["archiveFolder"],
+        message: "folder-overlap",
+      });
+  });
 export type CloudHarnessConfig = z.infer<typeof cloudHarnessConfigSchema>;
 export type HarnessOutcome = "passed" | "failed" | "inconclusive";
 type Metadata = Readonly<{
@@ -62,18 +94,8 @@ type Metadata = Readonly<{
 }>;
 type ReadData = Metadata & Readonly<{ content: string }>;
 type CliRecord =
-  | Readonly<{
-      ok: true;
-      operation: string;
-      status: number;
-      data: Record<string, unknown>;
-    }>
-  | Readonly<{
-      ok: false;
-      operation?: string;
-      status?: number;
-      error: GatewayFailureCode | ClientFailureCode;
-    }>;
+  | Readonly<{ ok: true; data: Record<string, unknown> }>
+  | Readonly<{ ok: false; error: GatewayFailureCode | ClientFailureCode }>;
 export interface CommandRunner {
   run(
     args: readonly string[],
@@ -89,6 +111,8 @@ const operationStages = [
   "search",
   "create",
   "read",
+  "duplicate_create",
+  "read_after_duplicate",
   "update",
   "read_after_update",
   "stale_update",
@@ -101,41 +125,48 @@ export type OperationOutcomes = Readonly<{
 }>;
 export interface HarnessEvidence {
   readonly schemaVersion: 1;
-  readonly harnessVersion: "2";
+  readonly harnessVersion: "3";
   readonly startedAt: string;
   readonly completedAt: string;
   readonly runIdentifier: string;
-  readonly releaseDigest: string;
+  readonly gatewayImageDigest: string;
+  readonly runtimeConfigDigest: string;
+  readonly liveCapabilityEvidenceDigest: string;
   readonly environmentIdentifier: string;
   readonly gatewayHostnameIdentifier: string;
   readonly allowedMethods: readonly ["GET", "POST"];
   readonly platformControls: CloudHarnessConfig["platformControls"];
   readonly gatewayCapabilities: Readonly<{
-    topology: "direct-root-only";
-    writes: "disabled";
-    archive: "disabled";
+    readonly expected: Readonly<{
+      readonly topology: "nested-tree";
+      readonly writes: "enabled";
+      readonly archive: "enabled";
+    }>;
+    readonly observed: Readonly<{
+      readonly topology: "nested-tree" | "not-observed";
+      readonly writes: "enabled" | "unsupported" | "not-observed";
+      readonly archive: "enabled" | "unsupported" | "not-observed";
+    }>;
   }>;
-  readonly overall: "passed" | "failed" | "inconclusive" | "blocked";
+  readonly overall: HarnessOutcome;
   readonly operationOutcomes: OperationOutcomes;
+  readonly duplicateRefusal: HarnessOutcome;
   readonly staleConflict: HarnessOutcome;
+  readonly archiveVerification: HarnessOutcome;
   readonly cleanup: HarnessOutcome;
-  readonly manualCleanup:
+  readonly manualRecovery:
     | Readonly<{ required: false }>
     | Readonly<{
         required: true;
         runReference: string;
-        direction: "locate-exact-generated-run-file-and-archive-manually";
+        direction: "manually-reread-the-exact-generated-run-file-then-archive-only-if-identity-and-revision-are-proved";
       }>;
   readonly redaction: "passed";
 }
-
 interface HarnessDependencies {
   readonly now?: () => Date;
   readonly uuid?: () => string;
-  /** Non-production seam for exercising a capability profile not shipped by the gateway. */
-  readonly testOnlyFutureCapabilities?: boolean;
 }
-
 const exact = (value: Record<string, unknown>, keys: readonly string[]) =>
   Object.keys(value).length === keys.length &&
   keys.every((key) => Object.hasOwn(value, key));
@@ -204,22 +235,16 @@ function parseCliRecord(stdout: string, expectedOperation: string): CliRecord {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error("protocol");
   const v = value as Record<string, unknown>;
-  const expectedSuccessStatus =
-    expectedOperation === "create_markdown" ? 201 : 200;
+  const successStatus = expectedOperation === "create_markdown" ? 201 : 200;
   if (
     v.ok === true &&
     exact(v, ["ok", "operation", "status", "operationId", "data"]) &&
     v.operation === expectedOperation &&
-    v.status === expectedSuccessStatus &&
+    v.status === successStatus &&
     text(v.operationId, 512) &&
     validData(expectedOperation, v.data)
   )
-    return {
-      ok: true,
-      operation: expectedOperation,
-      status: expectedSuccessStatus,
-      data: v.data as Record<string, unknown>,
-    };
+    return { ok: true, data: v.data as Record<string, unknown> };
   if (
     v.ok === false &&
     exact(v, ["ok", "error"]) &&
@@ -228,14 +253,13 @@ function parseCliRecord(stdout: string, expectedOperation: string): CliRecord {
     !Array.isArray(v.error)
   ) {
     const error = v.error as Record<string, unknown>;
-    const code = error.code;
     if (
-      typeof code === "string" &&
-      Object.hasOwn(clientFailures, code) &&
+      typeof error.code === "string" &&
+      Object.hasOwn(clientFailures, error.code) &&
       exact(error, ["code", "message"]) &&
-      error.message === clientFailures[code as ClientFailureCode][1]
+      error.message === clientFailures[error.code as ClientFailureCode][1]
     )
-      return { ok: false, error: code as ClientFailureCode };
+      return { ok: false, error: error.code as ClientFailureCode };
   }
   if (
     v.ok === false &&
@@ -275,7 +299,7 @@ function parseCliRecord(stdout: string, expectedOperation: string): CliRecord {
           text((locatorRecord as Record<string, unknown>).path, 1024)));
     const validRecovery =
       recovery === undefined ||
-      (code === "CONFLICT" &&
+      ((code === "CONFLICT" || code === "OUTCOME_UNKNOWN") &&
         recoveryRecord &&
         exact(recoveryRecord, ["action", "locator"]) &&
         recoveryRecord.action === "read" &&
@@ -288,12 +312,7 @@ function parseCliRecord(stdout: string, expectedOperation: string): CliRecord {
       error.message === gatewayFailures[code as GatewayFailureCode][2] &&
       validRecovery
     )
-      return {
-        ok: false,
-        operation: expectedOperation,
-        status: v.status,
-        error: code as GatewayFailureCode,
-      };
+      return { ok: false, error: code as GatewayFailureCode };
   }
   throw new Error("protocol");
 }
@@ -302,48 +321,54 @@ async function invoke(
   operation: string,
   args: readonly string[],
 ): Promise<CliRecord> {
-  const result = await runner.run(args);
-  const record = parseCliRecord(result.stdout, operation);
+  let result: Readonly<{ exitCode: number; stdout: string }>;
+  try {
+    result = await runner.run(args);
+  } catch {
+    return { ok: false, error: "TRANSPORT" };
+  }
+  let record: CliRecord;
+  try {
+    record = parseCliRecord(result.stdout, operation);
+  } catch {
+    return { ok: false, error: "PROTOCOL" };
+  }
   if (record.ok && result.exitCode === 0) return record;
   if (!record.ok) {
-    const expectedExit = Object.hasOwn(gatewayFailures, record.error)
+    const expected = Object.hasOwn(gatewayFailures, record.error)
       ? gatewayFailures[record.error as GatewayFailureCode][1]
       : clientFailures[record.error as ClientFailureCode][0];
-    if (result.exitCode === expectedExit) return record;
+    if (result.exitCode === expected) return record;
   }
-  throw new Error("cli-result");
+  return { ok: false, error: "PROTOCOL" };
 }
-
 const passed = (): OperationOutcome => ({ outcome: "passed", code: "OK" });
 const notAttempted = (): OperationOutcome => ({
   outcome: "inconclusive",
   code: "NOT_ATTEMPTED",
 });
-const blocked = (): OperationOutcome => ({
-  outcome: "inconclusive",
-  code: "BLOCKED",
-});
-const initialOutcomes = (): Record<OperationStage, OperationOutcome> =>
+const initialOutcomes = () =>
   Object.fromEntries(
     operationStages.map((stage) => [stage, notAttempted()]),
   ) as Record<OperationStage, OperationOutcome>;
-const resultOutcome = (
+const outcomeFor = (
   record: Exclude<CliRecord, { ok: true }>,
 ): OperationOutcome => ({
-  outcome:
-    record.error === "UNSUPPORTED" || record.error === "TRANSPORT"
-      ? "inconclusive"
-      : "failed",
+  outcome: ["UNSUPPORTED", "TRANSPORT", "PROTOCOL", "OUTCOME_UNKNOWN"].includes(
+    record.error,
+  )
+    ? "inconclusive"
+    : "failed",
   code: record.error,
 });
-const manualCleanup = (
+const manualRecovery = (
   runReference: string,
-): HarnessEvidence["manualCleanup"] => ({
+): HarnessEvidence["manualRecovery"] => ({
   required: true,
   runReference,
-  direction: "locate-exact-generated-run-file-and-archive-manually",
+  direction:
+    "manually-reread-the-exact-generated-run-file-then-archive-only-if-identity-and-revision-are-proved",
 });
-
 function baseEvidence(
   config: CloudHarnessConfig,
   startedAt: string,
@@ -353,32 +378,31 @@ function baseEvidence(
     HarnessEvidence,
     | "overall"
     | "operationOutcomes"
+    | "duplicateRefusal"
     | "staleConflict"
+    | "archiveVerification"
     | "cleanup"
-    | "manualCleanup"
+    | "manualRecovery"
+    | "gatewayCapabilities"
   >,
 ): HarnessEvidence {
   return {
     schemaVersion: 1,
-    harnessVersion: "2",
+    harnessVersion: "3",
     startedAt,
     completedAt,
     runIdentifier,
-    releaseDigest: config.releaseDigest,
+    gatewayImageDigest: config.gatewayImageDigest,
+    runtimeConfigDigest: config.runtimeConfigDigest,
+    liveCapabilityEvidenceDigest: config.liveCapabilityEvidenceDigest,
     environmentIdentifier: config.environmentIdentifier,
     gatewayHostnameIdentifier: config.gatewayHostnameIdentifier,
     allowedMethods: ["GET", "POST"],
     platformControls: config.platformControls,
-    gatewayCapabilities: {
-      topology: "direct-root-only",
-      writes: "disabled",
-      archive: "disabled",
-    },
     ...fields,
     redaction: "passed",
   };
 }
-
 export async function runHarness(
   configInput: unknown,
   confirmed: string,
@@ -390,94 +414,65 @@ export async function runHarness(
   const now = dependencies.now ?? (() => new Date());
   const runIdentifier = (dependencies.uuid ?? randomUUID)();
   const startedAt = now().toISOString();
-
-  // The shipped gateway is intentionally direct-root-only with writes and
-  // archive disabled. Keep the live executable blocked unless its capability
-  // profile and evidence contract both change.
-  if (dependencies.testOnlyFutureCapabilities !== true) {
-    return baseEvidence(config, startedAt, now().toISOString(), runIdentifier, {
-      overall: "blocked",
-      operationOutcomes: Object.fromEntries(
-        operationStages.map((stage) => [stage, blocked()]),
-      ) as OperationOutcomes,
-      staleConflict: "inconclusive",
-      cleanup: "passed",
-      manualCleanup: { required: false },
-    });
-  }
-
-  return runFutureSequence(config, runner, runIdentifier, startedAt, now);
-}
-
-async function runFutureSequence(
-  config: CloudHarnessConfig,
-  runner: CommandRunner,
-  runIdentifier: string,
-  startedAt: string,
-  now: () => Date,
-): Promise<HarnessEvidence> {
   const outcomes = initialOutcomes();
+  let duplicateRefusal: HarnessOutcome = "inconclusive";
   let staleConflict: HarnessOutcome = "inconclusive";
+  let archiveVerification: HarnessOutcome = "inconclusive";
   let cleanup: HarnessOutcome = "inconclusive";
-  let current: Metadata | undefined;
-  let cleanupDirection: HarnessEvidence["manualCleanup"] = { required: false };
-  let createUncertain = false;
-  let archiveRevisionVerified = false;
+  let recovery: HarnessEvidence["manualRecovery"] = { required: false };
+  let observedTopology: "nested-tree" | "not-observed" = "not-observed";
+  let observedWrites: "enabled" | "unsupported" | "not-observed" =
+    "not-observed";
+  let observedArchive: "enabled" | "unsupported" | "not-observed" =
+    "not-observed";
+  let hasKnownFile = false;
+  let uncertainMutation = false;
   const relativePath = `${config.validationFolder}/w27-codex-cloud-validation-${runIdentifier}.md`;
   const archivedPath = `${config.archiveFolder}/${basename(relativePath)}`;
   const initial = `w27 validation ${runIdentifier}\n`;
   const fresh = `w27 validation updated ${runIdentifier}\n`;
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), "w27-codex-cloud-"));
-  const contentFile = join(temporaryDirectory, "content.md");
+  const directory = await mkdtemp(join(tmpdir(), "w27-codex-cloud-"));
+  const contentFile = join(directory, "content.md");
   const call = async (
-    name: OperationStage,
+    stage: OperationStage,
     operation: string,
     args: readonly string[],
   ) => {
-    try {
-      const record = await invoke(runner, operation, [
-        "--timeout-ms",
-        String(config.timeoutMs),
-        ...args,
-      ]);
-      outcomes[name] = record.ok ? passed() : resultOutcome(record);
-      return record;
-    } catch (error) {
-      outcomes[name] = {
-        outcome:
-          error instanceof Error &&
-          (error.message === "protocol" || error.message === "cli-result")
-            ? "inconclusive"
-            : "failed",
-        code:
-          error instanceof Error &&
-          (error.message === "protocol" || error.message === "cli-result")
-            ? "PROTOCOL"
-            : "FAILED",
-      };
-      throw error;
-    }
+    const record = await invoke(runner, operation, [
+      "--timeout-ms",
+      String(config.timeoutMs),
+      ...args,
+    ]);
+    outcomes[stage] = record.ok ? passed() : outcomeFor(record);
+    return record;
+  };
+  const stop = (): never => {
+    throw new Error("stop");
   };
   try {
-    await chmod(temporaryDirectory, 0o700);
+    await chmod(directory, 0o700);
     await writeFile(contentFile, initial, { encoding: "utf8", mode: 0o600 });
     await chmod(contentFile, 0o600);
-    for (const [name, args] of [
-      ["list", ["list", "--path", config.validationFolder]],
-      ["archive_preflight", ["list", "--path", config.archiveFolder]],
+    for (const [stage, operation, args] of [
+      [
+        "list",
+        "list_markdown",
+        ["list", "--path", config.validationFolder, "--recursive"],
+      ],
+      [
+        "archive_preflight",
+        "list_markdown",
+        ["list", "--path", config.archiveFolder],
+      ],
       [
         "search",
+        "search_markdown",
         ["search", "w27-validation", "--path", config.validationFolder],
       ],
-    ] as const) {
-      const record = await call(
-        name,
-        name === "search" ? "search_markdown" : "list_markdown",
-        args,
-      );
-      if (!record.ok) throw new Error("preflight");
-    }
-    createUncertain = true;
+    ] as const)
+      if (!(await call(stage, operation, args)).ok) stop();
+    observedTopology = "nested-tree";
+    uncertainMutation = true;
     const created = await call("create", "create_markdown", [
       "create",
       relativePath,
@@ -485,46 +480,80 @@ async function runFutureSequence(
       contentFile,
     ]);
     if (!created.ok) {
-      if (created.error === "TRANSPORT" || created.error === "PROTOCOL") {
-        cleanupDirection = manualCleanup(runIdentifier);
-        outcomes.create = {
-          outcome: "inconclusive",
-          code: created.error,
-        };
-        createUncertain = false;
-      } else createUncertain = false;
-      throw new Error("create");
+      if (created.error === "UNSUPPORTED") observedWrites = "unsupported";
+      if (["TRANSPORT", "PROTOCOL", "OUTCOME_UNKNOWN"].includes(created.error))
+        recovery = manualRecovery(runIdentifier);
+      uncertainMutation = false;
+      throw new Error("stop");
     }
-    createUncertain = false;
-    const createdMetadata = created.data as Metadata;
-    if (createdMetadata.relativePath !== relativePath) {
+    const createdData = created.data;
+    uncertainMutation = false;
+    const createdMetadata = metadata(createdData) ? createdData : undefined;
+    if (!createdMetadata || createdMetadata.relativePath !== relativePath) {
       outcomes.create = { outcome: "failed", code: "MISMATCH" };
-      cleanupDirection = manualCleanup(runIdentifier);
-      throw new Error("create-identity");
+      recovery = manualRecovery(runIdentifier);
+      throw new Error("stop");
     }
-    current = createdMetadata;
-    const readCreated = await call("read", "read_markdown", [
+    let current: Metadata = createdMetadata;
+    hasKnownFile = true;
+    const createdRead = await call("read", "read_markdown", [
       "read",
       "--file-id",
       current.fileId,
     ]);
     if (
-      !readCreated.ok ||
-      !readData(readCreated.data) ||
-      readCreated.data.fileId !== current.fileId ||
-      readCreated.data.relativePath !== relativePath ||
-      readCreated.data.content !== initial ||
-      readCreated.data.revision !== current.revision
+      !createdRead.ok ||
+      !readData(createdRead.data) ||
+      createdRead.data.fileId !== current.fileId ||
+      createdRead.data.relativePath !== relativePath ||
+      createdRead.data.revision !== current.revision ||
+      createdRead.data.content !== initial
     ) {
-      if (readCreated.ok)
+      if (createdRead.ok)
         outcomes.read = { outcome: "failed", code: "MISMATCH" };
-      throw new Error("readback");
+      recovery = manualRecovery(runIdentifier);
+      stop();
     }
-    archiveRevisionVerified = true;
+    observedWrites = "enabled";
+    uncertainMutation = true;
+    const duplicate = await call("duplicate_create", "create_markdown", [
+      "create",
+      relativePath,
+      "--file",
+      contentFile,
+    ]);
+    uncertainMutation = false;
+    if (duplicate.ok || duplicate.error !== "CONFLICT") {
+      outcomes.duplicate_create = duplicate.ok
+        ? { outcome: "failed", code: "MISMATCH" }
+        : outcomeFor(duplicate);
+      duplicateRefusal = "failed";
+      recovery = manualRecovery(runIdentifier);
+      stop();
+    }
+    outcomes.duplicate_create = { outcome: "passed", code: "CONFLICT" };
+    duplicateRefusal = "passed";
+    const duplicateRead = await call("read_after_duplicate", "read_markdown", [
+      "read",
+      "--file-id",
+      current.fileId,
+    ]);
+    if (
+      !duplicateRead.ok ||
+      !readData(duplicateRead.data) ||
+      duplicateRead.data.fileId !== current.fileId ||
+      duplicateRead.data.relativePath !== relativePath ||
+      duplicateRead.data.revision !== current.revision ||
+      duplicateRead.data.content !== initial
+    ) {
+      if (duplicateRead.ok)
+        outcomes.read_after_duplicate = { outcome: "failed", code: "MISMATCH" };
+      recovery = manualRecovery(runIdentifier);
+      stop();
+    }
     const staleRevision = current.revision;
     await writeFile(contentFile, fresh, { encoding: "utf8", mode: 0o600 });
-    // A mutation may have applied even when its result cannot be verified.
-    archiveRevisionVerified = false;
+    uncertainMutation = true;
     const updated = await call("update", "update_markdown", [
       "update",
       "--file-id",
@@ -534,37 +563,46 @@ async function runFutureSequence(
       "--file",
       contentFile,
     ]);
-    if (!updated.ok) throw new Error("update");
-    const updatedMetadata = updated.data as Metadata;
+    if (!updated.ok) {
+      if (updated.error === "UNSUPPORTED") observedWrites = "unsupported";
+      if (["TRANSPORT", "PROTOCOL", "OUTCOME_UNKNOWN"].includes(updated.error))
+        recovery = manualRecovery(runIdentifier);
+      uncertainMutation = false;
+      throw new Error("stop");
+    }
+    const updatedData = updated.data;
+    uncertainMutation = false;
+    const updatedMetadata = metadata(updatedData) ? updatedData : undefined;
     if (
+      !updatedMetadata ||
       updatedMetadata.fileId !== current.fileId ||
       updatedMetadata.relativePath !== relativePath ||
       updatedMetadata.revision === staleRevision
     ) {
       outcomes.update = { outcome: "failed", code: "MISMATCH" };
-      throw new Error("revision");
+      recovery = manualRecovery(runIdentifier);
+      throw new Error("stop");
     }
     current = updatedMetadata;
-    const readUpdated = await call("read_after_update", "read_markdown", [
+    const updatedRead = await call("read_after_update", "read_markdown", [
       "read",
       "--file-id",
       current.fileId,
     ]);
     if (
-      !readUpdated.ok ||
-      !readData(readUpdated.data) ||
-      readUpdated.data.fileId !== current.fileId ||
-      readUpdated.data.relativePath !== relativePath ||
-      readUpdated.data.content !== fresh ||
-      readUpdated.data.revision !== current.revision
+      !updatedRead.ok ||
+      !readData(updatedRead.data) ||
+      updatedRead.data.fileId !== current.fileId ||
+      updatedRead.data.relativePath !== relativePath ||
+      updatedRead.data.revision !== current.revision ||
+      updatedRead.data.content !== fresh
     ) {
-      if (readUpdated.ok)
+      if (updatedRead.ok)
         outcomes.read_after_update = { outcome: "failed", code: "MISMATCH" };
-      throw new Error("readback");
+      recovery = manualRecovery(runIdentifier);
+      stop();
     }
-    archiveRevisionVerified = true;
-    // Re-establish the current revision after the deliberate stale mutation.
-    archiveRevisionVerified = false;
+    uncertainMutation = true;
     const stale = await call("stale_update", "update_markdown", [
       "update",
       "--file-id",
@@ -574,15 +612,17 @@ async function runFutureSequence(
       "--file",
       contentFile,
     ]);
+    uncertainMutation = false;
     if (stale.ok || stale.error !== "CONFLICT") {
       outcomes.stale_update = stale.ok
         ? { outcome: "failed", code: "MISMATCH" }
-        : resultOutcome(stale);
+        : outcomeFor(stale);
       staleConflict = "failed";
-      throw new Error("stale");
+      recovery = manualRecovery(runIdentifier);
+      stop();
     }
-    staleConflict = "passed";
     outcomes.stale_update = { outcome: "passed", code: "CONFLICT" };
+    staleConflict = "passed";
     const preserved = await call("read_after_conflict", "read_markdown", [
       "read",
       "--file-id",
@@ -593,115 +633,128 @@ async function runFutureSequence(
       !readData(preserved.data) ||
       preserved.data.fileId !== current.fileId ||
       preserved.data.relativePath !== relativePath ||
-      preserved.data.content !== fresh ||
-      preserved.data.revision !== current.revision
+      preserved.data.revision !== current.revision ||
+      preserved.data.content !== fresh
     ) {
       if (preserved.ok)
         outcomes.read_after_conflict = { outcome: "failed", code: "MISMATCH" };
-      throw new Error("preservation");
+      recovery = manualRecovery(runIdentifier);
+      stop();
     }
-    archiveRevisionVerified = true;
+    uncertainMutation = true;
+    const archived = await call("archive", "archive_markdown", [
+      "archive",
+      "--file-id",
+      current.fileId,
+      "--revision",
+      current.revision,
+    ]);
+    if (!archived.ok) {
+      if (archived.error === "UNSUPPORTED") observedArchive = "unsupported";
+      if (["TRANSPORT", "PROTOCOL", "OUTCOME_UNKNOWN"].includes(archived.error))
+        recovery = manualRecovery(runIdentifier);
+      uncertainMutation = false;
+      throw new Error("stop");
+    }
+    const archivedData = archived.data;
+    uncertainMutation = false;
+    if (
+      !metadata(archivedData) ||
+      archivedData.fileId !== current.fileId ||
+      archivedData.relativePath !== archivedPath
+    ) {
+      outcomes.archive = {
+        outcome: "inconclusive",
+        code: "ARCHIVE_UNVERIFIED",
+      };
+      recovery = manualRecovery(runIdentifier);
+      stop();
+    }
+    archiveVerification = "passed";
+    observedArchive = "enabled";
+    cleanup = "passed";
   } catch {
-    if (createUncertain) {
-      cleanupDirection = manualCleanup(runIdentifier);
-      outcomes.create = { outcome: "inconclusive", code: "PROTOCOL" };
-    }
+    if (uncertainMutation || hasKnownFile)
+      recovery = manualRecovery(runIdentifier);
+    if (recovery.required) cleanup = "inconclusive";
+    else if (cleanup !== "passed") cleanup = "passed";
   } finally {
-    try {
-      if (current && archiveRevisionVerified) {
-        const archived = await call("archive", "archive_markdown", [
-          "archive",
-          "--file-id",
-          current.fileId,
-          "--revision",
-          current.revision,
-        ]);
-        if (
-          archived.ok &&
-          metadata(archived.data) &&
-          archived.data.fileId === current.fileId &&
-          archived.data.relativePath === archivedPath
-        ) {
-          cleanup = "passed";
-          outcomes.archive = passed();
-        } else {
-          cleanup = archived.ok ? "inconclusive" : outcomes.archive.outcome;
-          if (archived.ok)
-            outcomes.archive = {
-              outcome: "inconclusive",
-              code: "ARCHIVE_UNVERIFIED",
-            };
-          cleanupDirection = manualCleanup(runIdentifier);
-        }
-      } else if (current || cleanupDirection.required) {
-        cleanup = "inconclusive";
-        cleanupDirection = manualCleanup(runIdentifier);
-      } else {
-        cleanup = "passed";
-      }
-    } catch {
+    await rm(directory, { recursive: true, force: true }).catch(() => {
       cleanup = "failed";
-      outcomes.archive = { outcome: "failed", code: "FAILED" };
-      cleanupDirection = manualCleanup(runIdentifier);
-    }
-    try {
-      await rm(temporaryDirectory, { recursive: true, force: true });
-    } catch {
-      cleanup = "failed";
-      cleanupDirection = manualCleanup(runIdentifier);
-    }
+      recovery = manualRecovery(runIdentifier);
+    });
   }
-  const hasFailedOperation = Object.values(outcomes).some(
-    ({ outcome }) => outcome === "failed",
-  );
-  const hasInconclusiveOperation = Object.values(outcomes).some(
-    ({ outcome }) => outcome === "inconclusive",
-  );
-  const overall =
-    cleanup === "failed" || hasFailedOperation
+  const values = Object.values(outcomes);
+  const finalCleanup = cleanup as HarnessOutcome;
+  const overall: HarnessOutcome =
+    finalCleanup === "failed" ||
+    values.some(({ outcome }) => outcome === "failed")
       ? "failed"
-      : cleanup === "inconclusive" ||
-          hasInconclusiveOperation ||
-          staleConflict !== "passed"
+      : finalCleanup === "inconclusive" ||
+          values.some(({ outcome }) => outcome === "inconclusive") ||
+          duplicateRefusal !== "passed" ||
+          staleConflict !== "passed" ||
+          archiveVerification !== "passed"
         ? "inconclusive"
         : "passed";
   return baseEvidence(config, startedAt, now().toISOString(), runIdentifier, {
     overall,
     operationOutcomes: outcomes,
+    gatewayCapabilities: {
+      expected: {
+        topology: "nested-tree",
+        writes: "enabled",
+        archive: "enabled",
+      },
+      observed: {
+        topology: observedTopology,
+        writes: observedWrites,
+        archive: observedArchive,
+      },
+    },
+    duplicateRefusal,
     staleConflict,
+    archiveVerification,
     cleanup,
-    manualCleanup: cleanupDirection,
+    manualRecovery: recovery,
   });
 }
-
 const outcomeSchema = z
   .object({
     outcome: z.enum(["passed", "failed", "inconclusive"]),
     code: z.enum([
       "OK",
-      "BLOCKED",
       "NOT_ATTEMPTED",
       "UNAUTHENTICATED",
       "UNSUPPORTED",
       "CONFLICT",
+      "OUTCOME_UNKNOWN",
       "USAGE",
       "CREDENTIAL",
       "TRANSPORT",
       "PROTOCOL",
       "MISMATCH",
       "ARCHIVE_UNVERIFIED",
-      "FAILED",
     ]),
   })
+  .strict();
+const stageSchema = z
+  .object(
+    Object.fromEntries(
+      operationStages.map((stage) => [stage, outcomeSchema]),
+    ) as Record<OperationStage, typeof outcomeSchema>,
+  )
   .strict();
 const evidenceSchema = z
   .object({
     schemaVersion: z.literal(1),
-    harnessVersion: z.literal("2"),
+    harnessVersion: z.literal("3"),
     startedAt: z.string().datetime(),
     completedAt: z.string().datetime(),
     runIdentifier: z.string().uuid(),
-    releaseDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+    gatewayImageDigest: digest,
+    runtimeConfigDigest: digest,
+    liveCapabilityEvidenceDigest: digest,
     environmentIdentifier: z.string().regex(/^example-[A-Za-z0-9-]{1,120}$/u),
     gatewayHostnameIdentifier: z
       .string()
@@ -710,36 +763,36 @@ const evidenceSchema = z
     platformControls: cloudHarnessConfigSchema.shape.platformControls,
     gatewayCapabilities: z
       .object({
-        topology: z.literal("direct-root-only"),
-        writes: z.literal("disabled"),
-        archive: z.literal("disabled"),
+        expected: z
+          .object({
+            topology: z.literal("nested-tree"),
+            writes: z.literal("enabled"),
+            archive: z.literal("enabled"),
+          })
+          .strict(),
+        observed: z
+          .object({
+            topology: z.enum(["nested-tree", "not-observed"]),
+            writes: z.enum(["enabled", "unsupported", "not-observed"]),
+            archive: z.enum(["enabled", "unsupported", "not-observed"]),
+          })
+          .strict(),
       })
       .strict(),
-    overall: z.enum(["passed", "failed", "inconclusive", "blocked"]),
-    operationOutcomes: z
-      .object({
-        list: outcomeSchema,
-        archive_preflight: outcomeSchema,
-        search: outcomeSchema,
-        create: outcomeSchema,
-        read: outcomeSchema,
-        update: outcomeSchema,
-        read_after_update: outcomeSchema,
-        stale_update: outcomeSchema,
-        read_after_conflict: outcomeSchema,
-        archive: outcomeSchema,
-      })
-      .strict(),
+    overall: z.enum(["passed", "failed", "inconclusive"]),
+    operationOutcomes: stageSchema,
+    duplicateRefusal: z.enum(["passed", "failed", "inconclusive"]),
     staleConflict: z.enum(["passed", "failed", "inconclusive"]),
+    archiveVerification: z.enum(["passed", "failed", "inconclusive"]),
     cleanup: z.enum(["passed", "failed", "inconclusive"]),
-    manualCleanup: z.union([
+    manualRecovery: z.union([
       z.object({ required: z.literal(false) }).strict(),
       z
         .object({
           required: z.literal(true),
           runReference: z.string().uuid(),
           direction: z.literal(
-            "locate-exact-generated-run-file-and-archive-manually",
+            "manually-reread-the-exact-generated-run-file-then-archive-only-if-identity-and-revision-are-proved",
           ),
         })
         .strict(),
@@ -747,11 +800,39 @@ const evidenceSchema = z
     redaction: z.literal("passed"),
   })
   .strict();
+export type EvidenceSanitizationContext = Readonly<{
+  readonly forbiddenValues?: readonly string[];
+}>;
 
-export function assertSanitizedEvidence(value: unknown): HarnessEvidence {
+export function assertSanitizedEvidence(
+  value: unknown,
+  context: EvidenceSanitizationContext = {},
+): HarnessEvidence {
   const forbidden =
-    /authorization|bearer|secret|token|url|path|content|revision|operationid|stdout|stderr|body/i;
+    /authorization|bearer|secret|token|url|path|content|revision|operationid|stdout|stderr|body|fileid|endpoint|header|provider|query|excerpt/i;
+  const forbiddenValues = (context.forbiddenValues ?? []).filter(
+    (entry) => entry.length > 0,
+  );
+  const containsForbiddenValue = (entry: string, forbiddenValue: string) => {
+    if (entry === forbiddenValue) return true;
+    // Embedded matching is limited to structured values with clear boundaries.
+    // This catches quoted paths and opaque identifiers without treating ordinary
+    // words in fixed evidence vocabulary as leaked configuration.
+    if (!/[/.:_=-]/u.test(forbiddenValue)) return false;
+    const escaped = forbiddenValue.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    return new RegExp(
+      `(?:^|[^A-Za-z0-9._/=-])${escaped}(?:$|[^A-Za-z0-9._/=-])`,
+      "u",
+    ).test(entry);
+  };
   const inspect = (entry: unknown): void => {
+    if (
+      typeof entry === "string" &&
+      forbiddenValues.some((forbiddenValue) =>
+        containsForbiddenValue(entry, forbiddenValue),
+      )
+    )
+      throw new Error("redaction");
     if (Array.isArray(entry)) {
       entry.forEach(inspect);
       return;

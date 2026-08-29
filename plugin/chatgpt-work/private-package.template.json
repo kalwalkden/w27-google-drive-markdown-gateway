@@ -29,9 +29,10 @@
     "tenantValuesRemainOutsideGit": true,
     "endpointMustUseHttpsWithoutCredentialsQueryOrFragment": true,
     "packageDoesNotGrantWriteAuthority": true,
-    "productionWriteSessionPresent": false,
-    "productionWriteOutcomeWithoutSession": "UNSUPPORTED",
-    "archiveSuccessBlockedUntilAtomicDestinationTopologyProof": true,
-    "archiveSuccessRequiresSeparatelyApprovedProductionWriteComposition": true
+    "runtimeWriteModeDefaultsToDisabled": true,
+    "writeEnablementIsDeploymentOwned": true,
+    "releaseEvidenceRuntimeAuthority": false,
+    "operatorMustUseDedicatedMarkedNestedTestTree": true,
+    "archiveMovesOnlyVerifiedFileAndNeverDeletesOrTrashes": true
   }
 }

@@ -30,10 +30,10 @@ describe("ChatGPT Work private package", () => {
       tenantValuesRemainOutsideGit: true,
       endpointMustUseHttpsWithoutCredentialsQueryOrFragment: true,
       packageDoesNotGrantWriteAuthority: true,
-      productionWriteSessionPresent: false,
-      productionWriteOutcomeWithoutSession: "UNSUPPORTED",
-      archiveSuccessBlockedUntilAtomicDestinationTopologyProof: true,
-      archiveSuccessRequiresSeparatelyApprovedProductionWriteComposition: true,
+      runtimeWriteModeDefaultsToDisabled: true,
+      writeEnablementIsDeploymentOwned: true,
+      releaseEvidenceRuntimeAuthority: false,
+      operatorMustUseDedicatedMarkedNestedTestTree: true,
     });
     expect(template.mcp.httpsMcpEndpointPlaceholder).toBe(
       "https://gateway.invalid/mcp",
@@ -52,6 +52,8 @@ describe("ChatGPT Work private package", () => {
     expect(instructions).toMatch(/Read before a mutation/u);
     expect(instructions).toMatch(/retain the opaque `revision`/u);
     expect(instructions).toMatch(/On `CONFLICT`, stop, reread/u);
+    expect(instructions).toContain("OUTCOME_UNKNOWN");
+    expect(instructions).toMatch(/timeout.*transport uncertainty/isu);
     expect(instructions).toMatch(/Never silently retry or overwrite/u);
     expect(instructions).toMatch(
       /Before\s+`archive_markdown`, request explicit user confirmation/u,
@@ -59,12 +61,10 @@ describe("ChatGPT Work private package", () => {
     expect(readme).toMatch(
       /never issue\s+a\s+deployment write authority or bypass its default-disabled boundary/u,
     );
-    expect(instructions + checklist + readme).toMatch(
-      /`create_markdown`, `update_markdown`, and `archive_markdown`[\s\S]{0,180}`UNSUPPORTED`/u,
-    );
+    expect(instructions + checklist + readme).toContain("`UNSUPPORTED`");
     expect(checklist).toMatch(/exact `\/mcp` path/u);
     expect(checklist).toMatch(
-      /BLOCKED until atomic destination-topology proof and a\s+separately approved production write composition/u,
+      /pre-provisioned nested\s+disposable validation folder/u,
     );
     expect(checklist).toMatch(/Never delete, trash,\s+share/u);
   });
@@ -72,16 +72,18 @@ describe("ChatGPT Work private package", () => {
   it("keeps the evidence template sanitized and non-authoritative", async () => {
     const evidence = JSON.parse(await asset("release-evidence.template.json"));
     expect(evidence).toMatchObject({
-      mcpEndpointIdentifier: "https://gateway.invalid/mcp",
-      writeApprovalBehavior: "UNSUPPORTED-expected-without-write-session",
-      cleanupStatus: "not-applicable",
-      writeGateDecisionInput: false,
+      gatewayImageDigest: `sha256:${"0".repeat(64)}`,
+      runtimeConfigDigest: `sha256:${"1".repeat(64)}`,
+      liveCapabilityEvidenceDigest: `sha256:${"2".repeat(64)}`,
+      cleanupStatus: "not-run",
+      releaseEvidenceRuntimeAuthority: false,
     });
     expect(Object.keys(evidence.operationOutcomes)).toEqual([
       "list_markdown",
       "search_markdown",
       "read_markdown",
       "create_markdown",
+      "duplicateCreateRefusal",
       "update_markdown",
       "staleUpdateConflict",
       "archive_markdown",

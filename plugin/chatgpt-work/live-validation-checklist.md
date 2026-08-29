@@ -13,32 +13,32 @@ endpoint.
 - Confirm the operator-entered issuer, audience, JWKS URL/key identifier,
   allowed algorithms, and principal match the deployment-owned `workMcp`
   configuration. Never paste a JWT or secret into package fields.
-- Confirm the adapter presents exactly the six expected tools and the gateway
-  deployment write mode remains default-disabled. The current production runtime
-  has no write session, so every create, update, and archive request must
-  return `UNSUPPORTED`.
+- Confirm the adapter presents exactly the six expected tools. Do not begin a
+  client check until the marked dedicated root/direct-child archive, provider
+  probe, reviewed Terraform plan, and controlled image/config digest gates are
+  satisfied. A default-disabled deployment returns `UNSUPPORTED` and ends the
+  check without a later mutation.
 
 ## Fixture and operations
 
-Within the already approved dedicated root, select an existing disposable
-Markdown fixture. Record an opaque fixture identifier/digest outside source
-control, then perform and record factual outcomes for:
+Within the already approved dedicated root, use one pre-provisioned nested
+disposable validation folder. Keep its location, IDs, revisions, endpoint,
+headers, screenshots, and transcript outside source control. Perform and record
+only sanitised factual outcomes for:
 
-1. `list_markdown`, `search_markdown`, and `read_markdown`.
-2. `create_markdown`, `update_markdown`, and `archive_markdown` only if the
-   operator has explicit approval to observe the current fail-closed response.
-   Each must return `UNSUPPORTED`; do not retry, bypass, or create a cleanup
-   fixture.
+1. Nested `list_markdown`, scoped `search_markdown`, and `read_markdown`.
+2. One UUID-derived nested `create_markdown`, duplicate refusal, readback,
+   exact-revision update, stale-revision `CONFLICT`, and final readback.
+3. One explicit `archive_markdown` after verified identity/revision; verify the
+   same identity is at the configured archive location.
 
-Record the platform's observed write path as `denied-as-expected`,
-`blocked-by-platform`, or `not-run`, with factual notes only. An absent
-gateway write session is an expected `UNSUPPORTED`, not permission to bypass
-the gate, and an unobserved UI prompt is not a pass.
+On `CONFLICT`, reread and wait for a choice. On `OUTCOME_UNKNOWN`, timeout, or
+transport uncertainty after a possible mutation, stop immediately: no retry,
+reread automation, archive cleanup, delete, trash, or broad cleanup. Record an
+inconclusive result and the fixed manual reread/reconcile direction only.
 
 ## Cleanup and incomplete runs
 
-No archive cleanup is available in current production. Never delete, trash,
-share, create a cleanup fixture, or broad-cleanup by a path or name pattern.
-Archive success remains BLOCKED until atomic destination-topology proof and a
-separately approved production write composition exist. Record cleanup as
-`not-applicable` and do not mark a future mutation release complete.
+The sole cleanup is this one verified archive. Never delete, trash, share,
+rename, create folders, or broad-cleanup by a path/name pattern. Evidence is a
+human release input only; it never enables write mode or claims a live success.

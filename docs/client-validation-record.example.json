@@ -1,25 +1,38 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "recordedAt": "2026-01-01T00:00:00.000Z",
-  "releaseDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "gatewayImageDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "runtimeConfigDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "liveCapabilityEvidenceDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "releaseEvidenceRuntimeAuthority": false,
+  "deploymentWriteMode": {
+    "expected": "default-off",
+    "observed": "not-run"
+  },
   "chatgptWork": {
     "pluginBuildIdentifier": "example-plugin-build",
-    "mcpEndpointIdentifier": "https://gateway.invalid/mcp",
-    "oauthIssuerIdentifier": "example-issuer",
-    "oauthAudienceIdentifier": "example-audience",
-    "oauthRedirectUriIdentifier": "example-redirect-uri",
-    "jwksKeyIdentifier": "example-jwks-key",
     "principalIdentifier": "example-work-principal",
-    "readCheck": "passed",
-    "writeWithoutSessionCheck": "UNSUPPORTED-expected"
+    "operationOutcomes": {
+      "list_markdown": "not-run",
+      "search_markdown": "not-run",
+      "read_markdown": "not-run",
+      "create_markdown": "not-run",
+      "duplicateCreateRefusal": "not-run",
+      "update_markdown": "not-run",
+      "staleUpdateConflict": "not-run",
+      "archive_markdown": "not-run"
+    },
+    "archiveVerification": "not-run",
+    "cleanup": "not-run",
+    "manualRecovery": "not-required",
+    "outcomeUnknown": "not-observed"
   },
   "codexCloud": {
     "environmentIdentifier": "example-environment",
-    "gatewayHostnameIdentifier": "example-gateway-host",
-    "allowedMethodIdentifiers": ["GET", "POST", "PATCH"],
-    "principalKeyIdentifier": "example-codex-key",
-    "healthCheck": "passed",
-    "readCheck": "passed",
-    "writeWithoutLeaseCheck": "denied-as-expected"
+    "gatewayHostnameIdentifier": "example-gateway",
+    "allowedMethods": ["GET", "POST"],
+    "overall": "not-run",
+    "manualRecovery": "not-required",
+    "outcomeUnknown": "not-observed"
   }
 }

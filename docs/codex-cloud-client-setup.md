@@ -5,17 +5,14 @@ gateway; it prepares an operator to use the checked-in `md-drive` client after
 those systems already exist. Repository skill/runtime readiness is separate:
 see [codex-cloud-preflight.md](codex-cloud-preflight.md).
 
-## Current status
+## Default status
 
 This repository currently runs locally. No Codex cloud session, deployed
-gateway, credentials, or tenant/platform controls are available here. Live
-validation is **BLOCKED** for a second, independent reason: the shipped gateway
-is direct-root-only, production writes are disabled, and archive is unavailable.
-The harness records those facts and makes no client request. Verifying cloud
-controls alone cannot unblock it. A future reviewed gateway capability change
-must update the harness gate and evidence contract before a mutation sequence
-can run. Local runtime can select a subagent model explicitly; do not infer that
-a cloud runtime can.
+gateway, credentials, or tenant/platform controls are available here. The local
+and deployment-default state is read-only: absent or false `write.enabled`
+returns `UNSUPPORTED` and no mutation occurs. Only an operator-selected,
+controlled write-enabled revision may be tested after the separate release
+gates; local tests never constitute live validation.
 
 ## Operator setup
 
@@ -48,10 +45,11 @@ into source control.
 
 ## Normal use and recovery
 
-Load `$codex-cloud-markdown-gateway`. Read before writing and retain the
-revision. Use one explicit update. On `CONFLICT`, reread and ask; on timeout or
-transport uncertainty, do not retry a mutation and reread before any later
-action. `UNAUTHENTICATED` means check the scoped injected bearer;
+Load `$codex-cloud-markdown-gateway`. Read before writing and retain the exact
+opaque revision. List/search may use a nested `--path`; update/archive use that
+revision. On `CONFLICT`, reread and ask; on `OUTCOME_UNKNOWN` (exit 9), timeout,
+or transport uncertainty, do not retry, clean up, or archive automatically:
+manually reread and reconcile before any later action. `UNAUTHENTICATED` means check the scoped injected bearer;
 `UNSUPPORTED` means the independently controlled write session is not
 available. Explicit archive intent is required. Do not substitute raw HTTP,
 `curl`, a cloud egress policy, or a passing client check for write authority.
@@ -61,16 +59,17 @@ available. Explicit archive intent is required. Do not substitute raw HTTP,
 `pnpm codex-cloud:harness -- run --config <external-config> --output
 <external-evidence> --confirm W27_CODEX_CLOUD_TEST_ONLY` is never CI/setup
 behavior. Run it only in a clean, operator-configured cloud environment with a
-dedicated validation location and external output path, after current platform
-controls and gateway deployment are verified. With the current gateway it emits
-a timestamped, sanitized **blocked** record without list, search, read, create,
-update, or archive calls. It is evidence only: direct-root-only topology,
-disabled write, or unavailable archive blocks release validation and
-never authorizes a bypass.
+pre-provisioned nested validation folder and external output path, only after a
+marked dedicated root/archive, provider probe, reviewed Terraform plan, and a
+controlled revision whose immutable image/config/probe digests match the input.
+It validates list/search/read/create, duplicate refusal, update, stale conflict,
+and archive verification. `UNSUPPORTED` is an inconclusive disabled-mode result
+with no later mutation. It is evidence only and never authorizes a bypass.
 
-If a future reviewed harness attempts create and receives an uncertain transport
-result, its evidence retains only an opaque run reference and the fixed direction
-to locate that exact generated run file and archive it manually. It never records
+If a harness mutation receives an uncertain transport result or `OUTCOME_UNKNOWN`,
+its evidence retains only an opaque run reference and the fixed direction to
+manually reread the exact generated run file, then archive only if identity and
+revision are proved. It never records
 the generated path, file ID, revision, content, endpoint, operation ID, or raw
 diagnostics. Archive can pass only after the returned identity and destination
 match the exact generated file and configured archive semantics; otherwise

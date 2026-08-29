@@ -2,7 +2,9 @@
 
 This is an operator-run safety experiment. It never runs in tests or normal validation. A
 `SUPPORTED` result proves only the observed Drive deployment accepted stale `If-Match` requests for
-this exact experiment; it does not enable product writes.
+this exact experiment; it does not enable product writes, prove gateway composition, or prove Work
+or Codex behavior. It is a required preceding release input for a separately reviewed controlled
+write-enabled revision.
 
 ## Prepare a dedicated test area
 
@@ -15,7 +17,9 @@ w27MarkdownGatewayTestRoot = v1
 
 The harness refuses every unmarked root, an archive that is not its direct child, mismatched Drive
 topologies, and My Drive/Shared Drive mode mismatches. It creates one Markdown blob with a unique
-run ID, then moves only that exact blob to the archive. It never deletes or trashes files.
+run ID, then moves only that exact blob to the archive. It never deletes or trashes files. Before
+any gateway-client check, an administrator pre-provisions a distinct nested validation folder under
+this marked root. Neither this probe nor either client harness creates or moves folders.
 
 Copy `config/live-drive-probe.example.json` outside this repository, replace the two placeholder
 folder IDs, and keep the resulting configuration out of version control.
@@ -63,7 +67,9 @@ updates, plus HTTP 412 for both stale mutations. Each proof also records a separ
 metadata/download readback; the evidence gate rejects older schema versions or records that blur
 the mutation response with that readback. The created file must be verified in the archive.
 `UNSUPPORTED`, `INCONCLUSIVE`, configuration failure,
-and cleanup failure are nonzero and preserve the fail-closed write policy. If a hard kill prevents
+and cleanup failure are nonzero and preserve the fail-closed write policy. Record only this probe's
+sanitized evidence digest in downstream Work/Codex release records; never copy provider details.
+If a hard kill prevents
 cleanup/evidence, inspect only the marked dedicated test root for the fixed
 `w27-drive-capability-` filename prefix and move the disposable Markdown file to the archive.
 

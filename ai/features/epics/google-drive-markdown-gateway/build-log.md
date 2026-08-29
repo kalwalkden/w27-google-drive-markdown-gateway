@@ -530,6 +530,21 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - No live credential, Drive, cloud, Work, Codex, or external network call ran.
 - Status: complete.
 
+## 2026-08-29 — 07-production-write-and-tree-support / 004-client-and-operator-release-gates
+
+- Implementation: `gpt-5.6-terra`, high reasoning. Aligned Work and Codex packages, nested operator
+  harness, deployment/security/observability guidance, and sanitized evidence with the enabled six-
+  operation runtime while keeping default-off environments factually blocked and mutation-free.
+- The harness binds three exact release/configuration digests; verifies duplicate and stale conflicts,
+  exact path/ID/revision/content readbacks, archive destination, and no-delete cleanup; and stops for
+  manual reconciliation on `OUTCOME_UNKNOWN`, transport, protocol, or mismatch results.
+- Premium review found traversal/overlap, capability-evidence, path-recheck, stale-doc, sanitizer, and
+  coverage gaps. All were repaired. A final sanitizer false positive on the word `archive` was fixed
+  with exact/delimited dynamic-value checks; repair review found no remaining issue.
+- Validation: full combined `CI=true pnpm check` passed with 260 tests, including 30 Codex harness
+  tests. No live credential, Drive, cloud, Work, Codex, or external network call ran.
+- Status: complete; feature-level review pending.
+
 ## 2026-08-29 — 05-operational-hardening final acceptance
 
 - Independent feature review: `gpt-5.6-sol`, high reasoning, fresh read-only context.

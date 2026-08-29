@@ -1,21 +1,23 @@
 {
   "schemaVersion": 1,
-  "releaseDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "gatewayImageDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "runtimeConfigDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "liveCapabilityEvidenceDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
   "privatePluginBuildIdentifier": "example-private-plugin-build",
   "workPlatformRevisionIdentifier": "example-work-platform-revision",
-  "mcpEndpointIdentifier": "https://gateway.invalid/mcp",
   "principalIdentifier": "example-work-principal",
   "operationOutcomes": {
     "list_markdown": "not-run",
     "search_markdown": "not-run",
     "read_markdown": "not-run",
     "create_markdown": "not-run",
+    "duplicateCreateRefusal": "not-run",
     "update_markdown": "not-run",
     "staleUpdateConflict": "not-run",
     "archive_markdown": "not-run"
   },
-  "writeApprovalBehavior": "UNSUPPORTED-expected-without-write-session",
-  "archiveSuccess": "BLOCKED-pending-atomic-destination-topology-proof-and-approved-production-write-composition",
-  "cleanupStatus": "not-applicable",
-  "writeGateDecisionInput": false
+  "archiveVerification": "not-run",
+  "cleanupStatus": "not-run",
+  "manualRecovery": "not-required",
+  "releaseEvidenceRuntimeAuthority": false
 }

@@ -6,5 +6,5 @@
    default-off deployment authority and authenticated server-side Drive writes.
 3. [x] `003-nested-mutations-and-archive` — Add single-dispatch nested create/update/archive with
    exact revisions, pre/postconditions, and unknown-outcome handling.
-4. [ ] `004-client-and-operator-release-gates` — Align Work, Codex, telemetry, documentation, and
+4. [x] `004-client-and-operator-release-gates` — Align Work, Codex, telemetry, documentation, and
    isolated release harnesses with the production behavior.

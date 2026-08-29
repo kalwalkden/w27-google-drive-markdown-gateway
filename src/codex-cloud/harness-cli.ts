@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   assertSanitizedEvidence,
+  cloudHarnessConfigSchema,
   type CommandRunner,
   confirmation,
   runHarness,
@@ -166,14 +167,22 @@ function mdDriveRunner(): CommandRunner {
   };
 }
 
-export async function main(args = process.argv.slice(2)): Promise<number> {
+export async function main(
+  args = process.argv.slice(2),
+  runner: CommandRunner = mdDriveRunner(),
+): Promise<number> {
   try {
     const parsed = parseHarnessArgs(args);
     const root = resolve(".");
     const configPath = await externalRegularFile(parsed.configPath, root);
-    const config = await readExternalConfig(configPath);
+    const config = cloudHarnessConfigSchema.parse(
+      await readExternalConfig(configPath),
+    );
     const evidence = assertSanitizedEvidence(
-      await runHarness(config, confirmation, mdDriveRunner()),
+      await runHarness(config, confirmation, runner),
+      {
+        forbiddenValues: [config.validationFolder, config.archiveFolder],
+      },
     );
     await publishExternalEvidence(
       parsed.outputPath,

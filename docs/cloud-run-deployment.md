@@ -1,7 +1,8 @@
 # Cloud Run deployment
 
-This guide is for an approved operator deploying the default read-only gateway. It does not create secret
-payloads, assign Drive permissions, or apply Terraform automatically.
+This guide is for an approved operator deploying the gateway. It does not create secret
+payloads, assign Drive permissions, or apply Terraform automatically. The default deployment is
+read-only; a separately reviewed revision may compose the server-side writer.
 
 ## Prerequisites and access boundaries
 
@@ -64,11 +65,14 @@ those claims to the gateway clock; it does not extend the signed issued-to-expir
    explicit invoker binding. Application bearer/OAuth verification remains mandatory in either case.
 
 Writes remain disabled unless both `enable_write=true` and `acknowledge_write_risk=true` appear in
-the reviewed plan. The second acknowledgement is required for an enabled revision and is separate
-from the service-apply acknowledgement. Before setting them, review dedicated-root capability
-evidence, the server-side Drive identity and scope, and Drive ACLs. Work JWT and Codex bearer
-credentials authenticate only to the gateway; they never authenticate to Google. My Drive OAuth
-may have a broader Google grant than the configured root, so this is an explicit operator risk.
+the reviewed plan; both inputs are explicitly `false` in the example configuration. The second
+acknowledgement is required for an enabled revision and is separate from the service-apply
+acknowledgement. Before setting them, review the marked dedicated root/archive, the provider
+capability evidence digest, the immutable container image digest, the canonical non-secret runtime
+configuration digest, the server-side Drive identity and scope, and Drive ACLs. An enabled plan is
+not proof of a live Drive operation or ACL correctness. Work JWT and Codex bearer credentials
+authenticate only to the gateway; they never authenticate to Google. My Drive OAuth may have a
+broader Google grant than the configured root, so this is an explicit operator risk.
 
 The Cloud Run service mounts the Codex bearer file for every mode. My Drive additionally mounts its
 OAuth credential only when selected. The service config contains the mount paths, never their
@@ -90,15 +94,17 @@ After deployment, verify only:
 - any Drive test-folder operation is performed only under the existing live capability-harness
   controls, with an approved operator and no authorization header copied into shell history or logs.
 
-The production runtime keeps JSON and MCP write sessions withheld until the mutation safety work is
-complete. Protected write endpoints remain `UNSUPPORTED` even in a write-enabled revision.
+The default revision reports `UNSUPPORTED` for unavailable writes. A controlled write-enabled
+revision is eligible for separate provider, Work, and Codex validation only after the independent
+release gates in [write-gate-and-client-validation.md](write-gate-and-client-validation.md). Those
+checks are release evidence, never runtime authority.
 
 ## Rollback and cleanup
 
-Rollback by assigning traffic to a prior known-good Cloud Run revision, or by deploying a prior
-immutable image digest with `enable_write=false` through the normal reviewed plan. Recheck
+Rollback by assigning traffic to a prior known-good Cloud Run revision, or by deploying a reviewed
+immutable image/config pair with `enable_write=false` through the normal reviewed plan. Recheck
 `/healthz`, protected-route rejection, and that writes remain disabled after rollback. Do not
-delete credentials or Drive data as part of rollback.
+delete credentials, evidence, or Drive data as part of rollback.
 
 Do not automatically delete Secret Manager versions, secret containers, or Drive data during
 rollback or teardown. Review retained revisions, state, Secret Manager retention policy, Artifact

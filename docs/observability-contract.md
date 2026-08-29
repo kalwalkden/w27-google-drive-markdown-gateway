@@ -15,13 +15,13 @@ Each externally reachable Markdown route with a route context emits at most one 
 | `operation` | `MarkdownApiOperation` | Closed vocabulary: `mcp` for Work MCP transport requests and the six Markdown operations for JSON API requests. |
 | `principal.kind` | `work-mcp`, `codex`, `unauthenticated` | Closed enum. |
 | `principal.subject`, `principal.issuer` | bounded, normalized authenticated facts | Audit-only; absent after failed authentication and never metrics. |
-| `result` | `MarkdownApiAuditResult` | Stable terminal category. |
+| `result` | `MarkdownApiAuditResult`, including `outcome_unknown` | Stable closed terminal category. `outcome_unknown` is the sole terminal category added for an unprovable post-dispatch mutation state. |
 | `statusCode`, `durationMs` | finite HTTP integer and non-negative rounded integer | Response classification and duration only. |
 | `fileId` | optional canonical opaque identifier (`[A-Za-z0-9_-]{1,256}`) | Audit-only for a safely known read/write target; never a failure-derived value or metric label. |
 | `dependency`, `dependencyFailure` | optional `drive` and `DriveProviderFailure` | Closed failure categories only; never provider payload, status, or message. |
 | `resultCount` | bounded integer for successful list/search | No individual result identity. |
 
-Arbitrary `metadata`, `error`, `request`, `response`, `labels`, and `context` fields are forbidden. Paths, queries, folder IDs, revisions/ETags, excerpts/content and lengths, bodies, authorization/JWT data, secret references, URLs, provider payload/status/message, and stacks are forbidden. Typed event construction is the primary protection; Pino redaction for authorization, token, secret, content, path, and revision keys is defense in depth.
+Arbitrary `metadata`, `error`, `request`, `response`, `labels`, and `context` fields are forbidden. Paths, queries, folder IDs, revisions/ETags, excerpts/content and lengths, bodies, authorization/JWT data, secret references, URLs, provider payload/status/message, dispatch state, deployment configuration, release evidence, and stacks are forbidden. `outcome_unknown` exposes no mutation state or recovery detail. Typed event construction is the primary protection; Pino redaction for authorization, token, secret, content, path, and revision keys is defense in depth.
 
 ## Metrics
 
