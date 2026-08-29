@@ -25,15 +25,17 @@
 - Cloud setup guidance lives in `docs/codex-cloud-preflight.md`.
 - The approved seven-feature implementation program lives under
   `ai/features/epics/google-drive-markdown-gateway/`.
-- Product formatting, linting, type-checking, and test configuration will land in the first task.
+- Product formatting, linting, type-checking, and test configuration are defined in `package.json`.
 
 ## Linting and testing commands
 
 - Setup integrity and vendored helper tests: `./scripts/verify-vendored-skills.sh`, defined by
   `scripts/verify-vendored-skills.sh` and required by `AGENTS.md`.
-- Product lint/format: not configured.
-- Product type-check: not configured.
-- Product tests: not configured.
+- Product lint/format: `pnpm lint`, `pnpm format`, and `pnpm format:check`.
+- Product type-check: `pnpm typecheck`.
+- Product tests: `pnpm test`.
+- Product build: `pnpm build`.
+- Aggregate validation: `pnpm check`.
 
 ## Project structure hotspots
 
