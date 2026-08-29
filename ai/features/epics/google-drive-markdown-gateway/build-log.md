@@ -247,3 +247,13 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
   checks. Terraform and Docker are unavailable locally and remain operator-only validations.
 - No live Drive, credential, cloud, provider, or external network operation ran.
 - Status: repaired; independent acceptance reruns pending
+
+## 2026-08-29 — Cloud Run resource-shape acceptance repair
+
+- Independent acceptance identified one remaining invalid platform combination: 1 vCPU with 8 GiB.
+- Terraform now rejects that pairing and retains the documented 4 GiB ceiling for a single vCPU;
+  the deployment contract test locks the constraint in place.
+- Validation: full combined `CI=true pnpm check` passed with 159 tests. Terraform and Docker remain
+  unavailable locally, so their executable validation stays in the operator checklist.
+- No cloud apply, image build, credential lookup, live Drive, or external network operation ran.
+- Status: repaired; narrow independent acceptance rerun pending

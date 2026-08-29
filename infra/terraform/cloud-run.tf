@@ -202,6 +202,10 @@ resource "google_cloud_run_v2_service" "gateway" {
       error_message = "root_folder_id and archive_folder_id must differ after trimming."
     }
     precondition {
+      condition     = var.cpu != "1" || contains(["512Mi", "1Gi", "2Gi", "4Gi"], var.memory)
+      error_message = "One vCPU supports at most 4Gi memory."
+    }
+    precondition {
       condition     = var.cpu != "2" || contains(["1Gi", "2Gi", "4Gi", "8Gi"], var.memory)
       error_message = "Two vCPUs require at least 1Gi memory."
     }

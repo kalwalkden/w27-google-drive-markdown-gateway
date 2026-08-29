@@ -77,6 +77,9 @@ describe("deployment assets", () => {
       "max_json_body_bytes >= var.max_request_markdown_bytes * 6 + 4096",
     );
     expect(cloudRun).toContain("max_result_items <= var.max_results");
+    expect(cloudRun).toContain(
+      'var.cpu != "1" || contains(["512Mi", "1Gi", "2Gi", "4Gi"], var.memory)',
+    );
     expect(variables).toContain('"512Mi", "1Gi", "2Gi", "4Gi", "8Gi"');
   });
 
