@@ -44,9 +44,9 @@ uses the normalized principal for audit metadata.
 - Codex config references a distinct mounted bearer file. The reader is invoked per credential
   verification; successful value comparison is constant-time. A secret file's path/value never
   crosses principal/error contracts.
-- `AuthenticatedPrincipal` is `{ kind, subject, issuer }` only. Work `subject` is a verified
-  nonempty JWT `sub`; Codex fields are fixed non-secret literals. No raw claims or credentials
-  survive the boundary.
+- `AuthenticatedPrincipal` is `{ kind, subject, issuer }` only. Work `subject` is a verified,
+  byte-bounded, nonempty, control-free JWT `sub`; Codex fields are fixed non-secret literals. No raw
+  claims or credentials survive the boundary.
 - `AuthenticationError` exposes exactly the stable `UNAUTHENTICATED` code/message. Its object,
   `cause`, and serialization must not retain raw provider errors, token strings, paths, URLs, keys,
   or claims.

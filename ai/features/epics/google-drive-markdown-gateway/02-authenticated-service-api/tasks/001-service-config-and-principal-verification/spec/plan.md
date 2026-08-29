@@ -90,8 +90,8 @@ secret-looking sample values in configuration.
 
 Create `src/auth/principal.ts` (or equivalently focused `src/auth/authentication.ts`) containing:
 
-- a discriminated `AuthenticatedPrincipal` with `kind: "work-mcp" | "codex"`, nonempty opaque
-  `subject`, and nonempty opaque `issuer`;
+- a discriminated `AuthenticatedPrincipal` with `kind: "work-mcp" | "codex"`, byte-bounded,
+  nonempty, control-free opaque `subject`, and nonempty opaque `issuer`;
 - `AuthenticationError`, whose public properties are only the stable code/message above; and
 - a narrow `PrincipalVerifier` interface accepting one raw Authorization value and resolving an
   `AuthenticatedPrincipal` or rejecting with `AuthenticationError`.
@@ -112,8 +112,8 @@ Accept exactly one case-insensitive `Bearer` scheme followed by one nonempty vis
 arrays, commas, repeated scheme/value, other schemes, whitespace/control characters, and anything
 outside the bounded token size. Do not decode or inspect a JWT for routing beyond the compact-token
 shape. A three-segment token is Work-only: invoke the injected/configured JWT verifier, require an
-exact verified issuer and a nonempty string `sub`, then return `work-mcp`. Any verification error is
-intentionally collapsed.
+exact verified issuer and a byte-bounded, nonempty, control-free string `sub`, then return `work-mcp`.
+Any verification error is intentionally collapsed.
 
 For a non-JWT-shaped Bearer value, resolve the Codex secret through the injected reader at the time
 of comparison. Read at most the configured small secret-file bound; accept exactly one normalized

@@ -147,3 +147,15 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - No live Drive request, credential operation, unconditional retry/fallback, trash, or delete was
   introduced. Normal composition remains write-disabled until external evidence issues a valid lease.
 - Status: complete; Drive Core awaits independent feature review
+
+## 2026-08-29 — 02-authenticated-service-api / 001-service-config-and-principal-verification
+
+- Implementation: `gpt-5.6-terra`, high reasoning for issuer/JWKS policy, principal separation,
+  mounted-secret rotation, constant-time comparison, and stable redacted failures.
+- Root review added a byte bound and control-character rejection for verified JWT subjects so future
+  principal audit fields cannot become unbounded or multiline output.
+- Validation: focused fake-only auth/config tests and full combined `CI=true pnpm check` passed with
+  109 tests, plus diff, vendored-skill, and credential-pattern checks.
+- No issuer/JWKS, filesystem secret, OAuth, Google, or network call was made. Deployment must still
+  supply the reviewed issuer/audience/algorithm policy and mounted secret references.
+- Status: complete
