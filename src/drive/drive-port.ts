@@ -18,6 +18,13 @@ export interface DriveRead {
   readonly content: string;
 }
 
+/** One bounded, non-reusable provider read scope. */
+export interface DriveReadSession {
+  getNode(id: FileId | FolderId): Promise<DriveNode | undefined>;
+  listChildren(folderId: FolderId): Promise<readonly DriveNode[]>;
+  readFile(fileId: FileId): Promise<DriveRead | undefined>;
+}
+
 export interface DriveSearchHit {
   readonly node: DriveNode;
   readonly excerpt?: string;
@@ -28,6 +35,14 @@ export class DriveListOverflowError extends Error {
   constructor() {
     super("Drive child list reached its overflow sentinel.");
     this.name = "DriveListOverflowError";
+  }
+}
+
+/** A request-local provider-work budget was exhausted before a complete result. */
+export class DriveReadLimitError extends Error {
+  constructor() {
+    super("Drive read session reached a configured limit.");
+    this.name = "DriveReadLimitError";
   }
 }
 
@@ -44,6 +59,8 @@ export interface DriveListOptions {
 
 /** Facts used by MarkdownService to resolve and verify documents. */
 export interface DriveReadPort {
+  /** Opens a fresh root-validated scope when the adapter supports shared bounds. */
+  openReadSession?(): Promise<DriveReadSession>;
   getNode(id: FileId | FolderId): Promise<DriveNode | undefined>;
   /**
    * Providers fail closed if the bound would omit a child. With overflowSignal

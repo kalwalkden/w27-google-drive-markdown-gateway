@@ -455,3 +455,45 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
   vendored skills. Independent scoped task review found no issues.
 - No live Drive, credential, cloud, Work, Codex, or external network call ran.
 - Status: complete.
+
+## 2026-08-29 — 05-operational-hardening / 003-rotation-recovery-alerting-runbooks
+
+- Implementation: `gpt-5.6-terra`, high reasoning. Added independent Work JWT, Codex bearer, and
+  Google credential rotation/revocation procedures; backend-neutral closed-metric alert semantics;
+  incident, timeout, recovery, cleanup, and Drive-administrator runbooks; and a sanitized external
+  exercise-record template.
+- The runbook does not claim a deployed exporter, alert backend, rotation, credential, recovery, or
+  live exercise. It preserves current write-disabled/archive-unavailable and no-delete/no-trash
+  behavior until the corrective production-write feature changes those facts.
+- Validation: full combined `CI=true pnpm check` passed with 269 tests. Fresh independent task review
+  returned Ready with no findings.
+- No live Drive, credential, cloud, Work, Codex, monitoring, or external network call ran.
+- Status: complete; operational-hardening feature review pending.
+
+## 2026-08-29 — 07-production-write-and-tree-support / 001-bounded-tree-read-model
+
+- Implementation: `gpt-5.6-terra`, high reasoning. Added scoped Drive read sessions with shared
+  page, traversal, metadata, media, content-search, and response budgets; restored deterministic
+  nested list/search/read; and enforced path/ID chain uniqueness with full topology postchecks.
+- Root validation is freshly fetched and charged during postconditions, including Shared Drive
+  identity. Exhausted completeness budgets stay `RESULT_LIMIT`; observed topology races return
+  `CONFLICT` without returning stale data.
+- Validation: full combined `CI=true pnpm check` passed with 272 tests. Initial independent review
+  found root-postcheck and error-classification gaps; both were repaired, and the fresh acceptance
+  rerun returned Ready with no findings.
+- No writes, archive, credential, cloud, Work, Codex, or external network call ran.
+- Status: complete.
+
+## 2026-08-29 — Operational feature review repair round
+
+- The operations alert contract now scopes deadline, latency, and rate-limit calculations to the six
+  JSON operations and explicitly records the current MCP deadline/limiter monitoring gap.
+- Threat and recovery guidance now reflects bounded, root-confined nested/recursive reads while
+  accurately retaining write-disabled, nested-mutation-unavailable, and archive-unavailable facts.
+- Work JWT verification now requires finite ordered `iat`/`exp` claims and enforces a deployment-
+  configured maximum token lifetime; the Terraform/example default is one hour. Codex bearer
+  authentication remains independent.
+- Validation: full combined `CI=true pnpm check` passed with 274 tests. Terraform formatting remains
+  an operator gate because Terraform is not installed locally.
+- No live issuer, JWKS, credential, cloud, Drive, Work, Codex, or external network call ran.
+- Status: repaired; fresh operational feature acceptance rerun pending.

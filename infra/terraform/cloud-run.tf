@@ -31,6 +31,7 @@ locals {
         jwksUrl                = var.work_mcp_jwks_url
         allowedAlgorithms      = var.work_mcp_allowed_algorithms
         clockToleranceSeconds  = var.work_mcp_clock_tolerance_seconds
+        maxTokenLifetimeSeconds = var.work_mcp_max_token_lifetime_seconds
         jwksTimeoutMs          = var.work_mcp_jwks_timeout_ms
         jwksCacheMaxAgeMs      = var.work_mcp_jwks_cache_max_age_ms
       }

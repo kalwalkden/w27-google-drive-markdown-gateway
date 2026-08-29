@@ -7,12 +7,13 @@ import {
   isWellFormedUtf16,
   revision,
 } from "../domain/markdown.js";
-import { DriveListOverflowError } from "./drive-port.js";
+import { DriveListOverflowError, DriveReadLimitError } from "./drive-port.js";
 import type {
   DriveListOptions,
   DriveNode,
   DriveRead,
   DriveReadPort,
+  DriveReadSession,
   DriveSearchHit,
 } from "./drive-port.js";
 import {
@@ -33,7 +34,7 @@ export {
 const folderMimeType = "application/vnd.google-apps.folder";
 const shortcutMimeType = "application/vnd.google-apps.shortcut";
 const metadataFields =
-  "id,name,mimeType,parents,modifiedTime,size,trashed,driveId,shortcutDetails";
+  "id,name,mimeType,parents,modifiedTime,size,trashed,driveId,etag,shortcutDetails";
 const defaultMaxReadBytes = 1_000_000;
 const defaultMaxTraversalNodes = 1_000;
 const defaultMaxPages = 100;
@@ -48,6 +49,8 @@ export type GoogleDriveReadAdapterConfig = Readonly<{
   maxReadBytes?: number;
   maxTraversalNodes?: number;
   maxPages?: number;
+  maxMetadataChecks?: number;
+  maxContentSearchFiles?: number;
   rootCacheTtlMs?: number;
 }>;
 
@@ -66,12 +69,15 @@ interface DriveFileResource {
   readonly size?: unknown;
   readonly trashed?: unknown;
   readonly driveId?: unknown;
+  readonly etag?: unknown;
 }
 
 export class GoogleDriveReadAdapter implements DriveReadPort {
   private readonly maxReadBytes: number;
   private readonly maxTraversalNodes: number;
   private readonly maxPages: number;
+  private readonly maxMetadataChecks: number;
+  private readonly maxContentSearchFiles: number;
   private readonly rootCacheTtlMs: number;
   private root?: RootContext;
   private rootPromise?: Promise<RootContext>;
@@ -86,6 +92,9 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
     this.maxTraversalNodes =
       config.maxTraversalNodes ?? defaultMaxTraversalNodes;
     this.maxPages = config.maxPages ?? defaultMaxPages;
+    this.maxMetadataChecks = config.maxMetadataChecks ?? 100_000;
+    this.maxContentSearchFiles =
+      config.maxContentSearchFiles ?? this.maxTraversalNodes;
     this.rootCacheTtlMs = config.rootCacheTtlMs ?? defaultRootCacheTtlMs;
     this.validateConfig();
   }
@@ -93,6 +102,136 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
   invalidateRootContext(): void {
     this.root = undefined;
     this.rootGeneration += 1;
+  }
+
+  async openReadSession(): Promise<DriveReadSession> {
+    let pages = 0;
+    let nodes = 0;
+    let metadata = 0;
+    let contentReads = 0;
+    const consumeMetadata = (): void => {
+      if (++metadata > this.maxMetadataChecks) throw new DriveReadLimitError();
+    };
+    const validateScopedRoot = async (): Promise<RootContext> => {
+      consumeMetadata();
+      const rootResource = await this.fetchMetadataWithDriveId(
+        this.config.rootFolderId,
+        "root-validation",
+      );
+      const root = rootResource?.node;
+      if (
+        !root ||
+        root.id !== this.config.rootFolderId ||
+        root.kind !== "folder"
+      ) {
+        throw new GoogleDriveProviderError("configuration", "root-validation");
+      }
+      return {
+        node: root,
+        driveId: this.driveIdForRoot(rootResource.driveId),
+        expiresAt: this.sampleNow() + this.rootCacheTtlMs,
+      };
+    };
+    // A scoped read cannot borrow the adapter cache: every root read is part of
+    // the mutable chain snapshot and must consume this request's metadata budget.
+    const root = await validateScopedRoot();
+    const fetch = async (
+      id: FileId | FolderId,
+      operation: ProviderOperation,
+    ): Promise<DriveNode | undefined> => {
+      consumeMetadata();
+      return this.fetchMetadata(id, operation);
+    };
+    const list = async (folder: FolderId): Promise<readonly DriveNode[]> => {
+      this.assertWellFormedId(folder, "list-children");
+      const result: DriveNode[] = [];
+      let pageToken: string | undefined;
+      do {
+        if (++pages > this.maxPages) throw new DriveReadLimitError();
+        const data = await this.callList({
+          q: `'${escapeDriveQueryLiteral(folder)}' in parents and trashed = false`,
+          fields: `nextPageToken,files(${metadataFields})`,
+          pageSize: 100,
+          pageToken,
+          supportsAllDrives: true,
+          ...(root.driveId
+            ? {
+                corpora: "drive",
+                driveId: root.driveId,
+                includeItemsFromAllDrives: true,
+              }
+            : { corpora: "user" }),
+        });
+        const page = parseListResource(data, "list-children");
+        nodes += page.files.length;
+        if (nodes > this.maxTraversalNodes) throw new DriveReadLimitError();
+        for (const resource of page.files) {
+          const candidate = normalizeNode(resource, "list-children");
+          if (candidate.kind !== "file") {
+            result.push(candidate);
+            continue;
+          }
+          const current = await fetch(candidate.id as FileId, "get-metadata");
+          if (!current)
+            throw new GoogleDriveProviderError("malformed", "list-children");
+          result.push(current);
+        }
+        pageToken = page.nextPageToken;
+      } while (pageToken);
+      return result;
+    };
+    return {
+      getNode: async (id) => {
+        this.assertWellFormedId(id, "get-metadata");
+        return id === this.config.rootFolderId
+          ? (await validateScopedRoot()).node
+          : fetch(id, "get-metadata");
+      },
+      listChildren: list,
+      readFile: async (id) => {
+        this.assertWellFormedId(id, "read-media");
+        if (++contentReads > this.maxContentSearchFiles)
+          throw new DriveReadLimitError();
+        const node = await fetch(id, "get-metadata");
+        if (!node) return undefined;
+        if (
+          node.kind !== "file" ||
+          node.size === undefined ||
+          node.revision === undefined ||
+          node.size > this.maxReadBytes ||
+          node.mimeType?.startsWith("application/vnd.google-apps.")
+        ) {
+          throw new GoogleDriveProviderError("malformed", "read-media");
+        }
+        const response = await this.callGet(
+          {
+            fileId: id,
+            alt: "media",
+            responseType: "arraybuffer",
+            supportsAllDrives: true,
+          },
+          "read-media",
+        );
+        if (response === notFound)
+          throw new GoogleDriveProviderError("not-found", "read-media");
+        const bytes = toBytes(response.data);
+        if (
+          bytes.byteLength > this.maxReadBytes ||
+          bytes.byteLength !== node.size
+        )
+          throw new GoogleDriveProviderError("malformed", "read-media");
+        let content: string;
+        try {
+          content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        } catch {
+          throw new GoogleDriveProviderError("malformed", "read-media");
+        }
+        const after = await fetch(id, "get-metadata");
+        if (!after || !sameNodeFacts(node, after))
+          throw new GoogleDriveProviderError("malformed", "read-media");
+        return { node: after, content };
+      },
+    };
   }
 
   async getNode(id: FileId | FolderId): Promise<DriveNode | undefined> {
@@ -271,7 +410,6 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
     await this.ensureRoot();
     const node = await this.fetchMetadata(id, "get-metadata");
     if (!node) return undefined;
-    this.assertDirectRootChild(node);
     if (
       node.kind !== "file" ||
       node.size === undefined ||
@@ -304,17 +442,7 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
     const after = await this.fetchMetadata(id, "get-metadata");
     if (!after || !sameNodeFacts(node, after))
       throw new GoogleDriveProviderError("malformed", "read-media");
-    this.assertDirectRootChild(after);
     return { node: after, content };
-  }
-
-  private assertDirectRootChild(node: DriveNode): void {
-    if (
-      node.parentIds.length !== 1 ||
-      node.parentIds[0] !== this.config.rootFolderId
-    ) {
-      throw new GoogleDriveProviderError("configuration", "read-media");
-    }
   }
 
   private validateConfig(): void {
@@ -328,6 +456,8 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
       this.maxReadBytes,
       this.maxTraversalNodes,
       this.maxPages,
+      this.maxMetadataChecks,
+      this.maxContentSearchFiles,
       this.rootCacheTtlMs,
     ]) {
       if (!Number.isSafeInteger(value) || value < 1)
@@ -531,6 +661,9 @@ function normalizeNode(
       kind: "folder",
       parentIds,
       modifiedTime,
+      revision: isEntityTag(rawEtag ?? value.etag)
+        ? revision(rawEtag ?? (value.etag as string))
+        : undefined,
       mimeType,
     };
   }
@@ -553,7 +686,9 @@ function normalizeNode(
     modifiedTime,
     // A file never receives a synthetic revision; list results are refreshed via
     // metadata GET so every visible mutable document carries its raw HTTP ETag.
-    revision: isEntityTag(rawEtag) ? revision(rawEtag) : undefined,
+    revision: isEntityTag(rawEtag ?? value.etag)
+      ? revision(rawEtag ?? (value.etag as string))
+      : undefined,
     size,
     mimeType,
   };

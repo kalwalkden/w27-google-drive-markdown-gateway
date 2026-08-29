@@ -7,7 +7,7 @@ import {
   revision,
   utf8ByteSize,
 } from "../domain/markdown.js";
-import { DriveListOverflowError } from "./drive-port.js";
+import { DriveListOverflowError, DriveReadLimitError } from "./drive-port.js";
 import type {
   ConditionalWriteResult,
   CreateWriteResult,
@@ -15,9 +15,17 @@ import type {
   DriveNode,
   DriveRead,
   DriveReadPort,
+  DriveReadSession,
   DriveSearchHit,
   RawDriveWritePort,
 } from "./drive-port.js";
+
+export interface InMemoryDrivePortConfig {
+  readonly maxTraversalNodes?: number;
+  readonly maxMetadataChecks?: number;
+  readonly maxContentSearchFiles?: number;
+  readonly maxMarkdownBytes?: number;
+}
 
 export interface InMemoryNodeFixture {
   readonly id?: string;
@@ -46,7 +54,42 @@ export class InMemoryDrivePort implements DriveReadPort, RawDriveWritePort {
   private nextTick = 0;
   private nextRevision = 1;
 
-  constructor(private readonly epoch = "2026-01-01T00:00:00.000Z") {}
+  constructor(
+    private readonly epoch = "2026-01-01T00:00:00.000Z",
+    private readonly readConfig: InMemoryDrivePortConfig = {},
+  ) {}
+
+  async openReadSession(): Promise<DriveReadSession> {
+    let traversed = 0;
+    let metadata = 0;
+    let contentReads = 0;
+    const maxTraversalNodes = this.readConfig.maxTraversalNodes ?? 10_000;
+    const maxMetadataChecks = this.readConfig.maxMetadataChecks ?? 100_000;
+    const maxContentSearchFiles =
+      this.readConfig.maxContentSearchFiles ?? maxTraversalNodes;
+    const maxMarkdownBytes = this.readConfig.maxMarkdownBytes ?? 10_000_000;
+    return {
+      getNode: async (id) => {
+        if (++metadata > maxMetadataChecks) throw new DriveReadLimitError();
+        return this.getNode(id);
+      },
+      listChildren: async (folder) => {
+        const children = await this.listChildren(folder);
+        traversed += children.length;
+        if (traversed > maxTraversalNodes) throw new DriveReadLimitError();
+        return children;
+      },
+      readFile: async (id) => {
+        if (++contentReads > maxContentSearchFiles)
+          throw new DriveReadLimitError();
+        const read = await this.readFile(id);
+        if (read && utf8ByteSize(read.content) > maxMarkdownBytes) {
+          throw new DriveReadLimitError();
+        }
+        return read;
+      },
+    };
+  }
 
   addFixture(fixture: InMemoryNodeFixture): DriveNode {
     const id = fixture.id ?? `node-${this.nextId++}`;
@@ -227,6 +270,13 @@ export class InMemoryDrivePort implements DriveReadPort, RawDriveWritePort {
     return node
       ? Object.freeze({ ...this.snapshot(node), content: node.content })
       : undefined;
+  }
+
+  setFixtureParents(id: string, parentIds: readonly string[]): void {
+    const node = this.nodes.get(id);
+    if (!node) throw new Error(`Unknown fixture id: ${id}`);
+    node.parentIds = parentIds.map(folderId);
+    node.modifiedTime = this.timestamp();
   }
 
   private timestamp(): string {

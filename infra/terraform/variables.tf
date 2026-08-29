@@ -212,6 +212,17 @@ variable "work_mcp_clock_tolerance_seconds" {
   }
 }
 
+variable "work_mcp_max_token_lifetime_seconds" {
+  type        = number
+  description = "Maximum accepted Work MCP JWT issued-to-expiry lifetime in seconds."
+  default     = 3600
+
+  validation {
+    condition     = var.work_mcp_max_token_lifetime_seconds >= 60 && var.work_mcp_max_token_lifetime_seconds <= 86400 && floor(var.work_mcp_max_token_lifetime_seconds) == var.work_mcp_max_token_lifetime_seconds
+    error_message = "work_mcp_max_token_lifetime_seconds must be an integer from 60 to 86400."
+  }
+}
+
 variable "work_mcp_jwks_timeout_ms" {
   type        = number
   description = "JWKS request timeout in milliseconds."

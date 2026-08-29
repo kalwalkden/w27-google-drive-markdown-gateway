@@ -93,6 +93,8 @@ function readAdapterConfig(
     maxReadBytes: drive.maxMarkdownBytes,
     maxTraversalNodes: drive.maxTraversalNodes,
     maxPages: drive.maxPages,
+    maxMetadataChecks: drive.maxMetadataChecks,
+    maxContentSearchFiles: drive.maxContentSearchFiles,
   };
 }
 
@@ -125,6 +127,10 @@ export async function composeRuntime(
     defaultSearchLimit: Math.min(20, config.http.maxResultItems),
     maxSearchLimit: config.http.maxResultItems,
     maxListResults: config.http.maxResultItems,
+    maxPathDepth: config.drive.maxPathDepth,
+    maxTraversalNodes: config.drive.maxTraversalNodes,
+    maxContentSearchFiles: config.drive.maxContentSearchFiles,
+    maxJsonResponseBytes: config.http.maxJsonResponseBytes,
   });
   const principalVerifier = (
     dependencies.createVerifier ?? createPrincipalVerifier

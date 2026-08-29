@@ -63,10 +63,12 @@ class FakeDriveApi implements GoogleDriveApi {
   readonly etags = new Map<string, string>();
   nextPages = new Map<string, readonly Resource[][]>();
   error?: unknown;
+  beforeGet?: (request: Readonly<Record<string, unknown>>) => void;
 
   readonly files = {
     get: async (request: Readonly<Record<string, unknown>>) => {
       this.gets.push(request);
+      this.beforeGet?.(request);
       if (this.error) throw this.error;
       const id = request.fileId as string;
       if (request.alt === "media") return { data: this.media.get(id) };
@@ -222,11 +224,14 @@ describe("GoogleDriveReadAdapter", () => {
       "two",
     ]);
 
-    const service = new MarkdownService(adapter(api), {
-      rootFolderId: folderId("root"),
-      archiveFolderId: folderId("archive"),
-      maxListResults: 2,
-    });
+    const service = new MarkdownService(
+      adapter(api, { maxTraversalNodes: 2 }),
+      {
+        rootFolderId: folderId("root"),
+        archiveFolderId: folderId("archive"),
+        maxListResults: 2,
+      },
+    );
     await expect(service.listMarkdown()).rejects.toMatchObject({
       code: "RESULT_LIMIT",
     });
@@ -269,8 +274,8 @@ describe("GoogleDriveReadAdapter", () => {
     await expect(service.listMarkdown()).rejects.toMatchObject({
       code: "RESULT_LIMIT",
     });
-    expect(api.lists).toHaveLength(2);
-    expect(api.gets.map((request) => request.fileId)).toEqual(["root", "one"]);
+    expect(api.lists).toHaveLength(4);
+    expect(api.gets.map((request) => request.fileId)).toContain("one");
   });
 
   it("fails closed when the enumeration cap has a next page or an oversized page", async () => {
@@ -320,7 +325,7 @@ describe("GoogleDriveReadAdapter", () => {
 
     await expect(
       service.readMarkdown({ path: "same.md" }),
-    ).rejects.toMatchObject({ failure: "limit", operation: "list-children" });
+    ).rejects.toMatchObject({ code: "RESULT_LIMIT" });
     await expect(
       drive.searchDirectChildren(folderId("root"), "same", 1),
     ).rejects.toMatchObject({ failure: "limit", operation: "list-children" });
@@ -386,6 +391,60 @@ describe("GoogleDriveReadAdapter", () => {
     await expect(
       drive.listDescendants(folderId("root"), { recursive: true, limit: 1 }),
     ).rejects.toMatchObject({ failure: "limit" });
+  });
+
+  it("shares traversal work across folders in one fresh read session", async () => {
+    const api = new FakeDriveApi();
+    api.resources.set("root", folder("root", "root"));
+    api.resources.set("docs", folder("docs", "docs", ["root"]));
+    api.resources.set("guide", file("guide", "guide.md", ["docs"], "body"));
+    const session = await adapter(api, {
+      maxTraversalNodes: 1,
+    }).openReadSession();
+
+    await expect(session.listChildren(folderId("root"))).resolves.toHaveLength(
+      1,
+    );
+    await expect(session.listChildren(folderId("docs"))).rejects.toMatchObject({
+      name: "DriveReadLimitError",
+    });
+  });
+
+  it("counts fresh scoped root validation against the metadata budget", async () => {
+    const api = new FakeDriveApi();
+    api.resources.set("root", folder("root", "root"));
+    const session = await adapter(api, {
+      maxMetadataChecks: 1,
+    }).openReadSession();
+
+    await expect(session.getNode(folderId("root"))).rejects.toMatchObject({
+      name: "DriveReadLimitError",
+    });
+    expect(api.gets).toHaveLength(1);
+  });
+
+  it("revalidates the root during scoped postchecks", async () => {
+    const api = new FakeDriveApi();
+    api.resources.set("root", folder("root", "root"));
+    api.resources.set("guide", file("guide", "guide.md", ["root"], "body"));
+    api.media.set("guide", new TextEncoder().encode("body"));
+    let rootGets = 0;
+    api.beforeGet = (request) => {
+      if (request.fileId !== "root" || request.alt === "media") return;
+      rootGets += 1;
+      if (rootGets === 3) {
+        api.resources.set("root", folder("root", "renamed-root"));
+      }
+    };
+    const service = new MarkdownService(adapter(api), {
+      rootFolderId: folderId("root"),
+      archiveFolderId: folderId("archive"),
+    });
+
+    await expect(
+      service.readMarkdown({ path: "guide.md" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(rootGets).toBe(3);
   });
 
   it("searches only already-enumerated descendant names", async () => {

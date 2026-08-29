@@ -7,6 +7,7 @@ import express from "express";
 import { describe, expect, it } from "vitest";
 
 import type { SecretFileReference } from "../../src/config/service-config.js";
+import { folderId } from "../../src/domain/markdown.js";
 import {
   composeRuntime,
   defaultCloudRunPort,
@@ -21,6 +22,9 @@ function config(mode: "shared-drive-adc" | "my-drive-refresh-token") {
     maxMarkdownBytes: 1_000,
     maxTraversalNodes: 11,
     maxPages: 1,
+    maxPathDepth: 20,
+    maxMetadataChecks: 1_000,
+    maxContentSearchFiles: 10,
     maxResults: 10,
     ...(mode === "shared-drive-adc"
       ? { sharedDriveId: "shared" }
@@ -35,6 +39,7 @@ function config(mode: "shared-drive-adc" | "my-drive-refresh-token") {
         jwksUrl: "https://keys.invalid/jwks",
         allowedAlgorithms: ["RS256"],
         clockToleranceSeconds: 0,
+        maxTokenLifetimeSeconds: 3_600,
         jwksTimeoutMs: 100,
         jwksCacheMaxAgeMs: 1_000,
       },
@@ -124,8 +129,16 @@ describe("runtime composition", () => {
     await composeRuntime(JSON.stringify(parsed), {
       ...runtimeDependencies([]),
       createReadAdapter: () => ({
-        async getNode() {
-          return undefined;
+        async getNode(id) {
+          return id === "root"
+            ? {
+                id: folderId("root"),
+                name: "root",
+                kind: "folder" as const,
+                parentIds: [],
+                modifiedTime: "2026-01-01T00:00:00.000Z",
+              }
+            : undefined;
         },
         async listChildren(_folder, options) {
           listOptions.push(options);
@@ -153,10 +166,10 @@ describe("runtime composition", () => {
 
     if (!service) throw new Error("runtime did not compose a service");
     await expect(service.listMarkdown()).resolves.toEqual([]);
-    expect(listOptions).toEqual([{ limit: 3, overflowSignal: true }]);
+    expect(listOptions).toEqual([undefined]);
   });
 
-  it("redacts an equal traversal and HTTP result limit before runtime composition", async () => {
+  it("permits a deliberately smaller traversal budget before runtime composition", async () => {
     const parsed = JSON.parse(config("shared-drive-adc")) as {
       drive: { maxTraversalNodes: number };
       http: { maxResultItems: number };
@@ -165,7 +178,7 @@ describe("runtime composition", () => {
 
     await expect(
       composeRuntime(JSON.stringify(parsed), runtimeDependencies([])),
-    ).rejects.toThrow("Runtime configuration is invalid.");
+    ).resolves.toMatchObject({ config: { drive: { maxTraversalNodes: 10 } } });
   });
 
   it("loads a bounded OAuth file only for My Drive before composing its adapter", async () => {

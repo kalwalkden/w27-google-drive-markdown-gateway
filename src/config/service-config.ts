@@ -107,6 +107,9 @@ const driveSchema = z
         maxMarkdownBytes: boundedPositiveInteger(1, 10_000_000),
         maxTraversalNodes: boundedPositiveInteger(1, 10_000),
         maxPages: boundedPositiveInteger(1, 100),
+        maxPathDepth: boundedPositiveInteger(1, 100),
+        maxMetadataChecks: boundedPositiveInteger(1, 100_000),
+        maxContentSearchFiles: boundedPositiveInteger(1, 10_000),
         maxResults: boundedPositiveInteger(1, 1_000),
       })
       .strict(),
@@ -119,6 +122,9 @@ const driveSchema = z
         maxMarkdownBytes: boundedPositiveInteger(1, 10_000_000),
         maxTraversalNodes: boundedPositiveInteger(1, 10_000),
         maxPages: boundedPositiveInteger(1, 100),
+        maxPathDepth: boundedPositiveInteger(1, 100),
+        maxMetadataChecks: boundedPositiveInteger(1, 100_000),
+        maxContentSearchFiles: boundedPositiveInteger(1, 10_000),
         maxResults: boundedPositiveInteger(1, 1_000),
       })
       .strict(),
@@ -156,6 +162,7 @@ const serviceConfigSchema = z
                 }
               }),
             clockToleranceSeconds: boundedPositiveInteger(0, 300),
+            maxTokenLifetimeSeconds: boundedPositiveInteger(60, 86_400),
             jwksTimeoutMs: boundedPositiveInteger(100, 30_000),
             jwksCacheMaxAgeMs: boundedPositiveInteger(1_000, 3_600_000),
           })
@@ -199,16 +206,11 @@ const serviceConfigSchema = z
         path: ["http", "maxResultItems"],
       });
     }
-    const requiredTraversalNodes = http.maxResultItems + 1;
-    if (
-      !Number.isSafeInteger(requiredTraversalNodes) ||
-      drive.maxTraversalNodes < requiredTraversalNodes
-    ) {
+    if (drive.maxContentSearchFiles > drive.maxTraversalNodes) {
       context.addIssue({
         code: "custom",
-        message:
-          "Drive traversal limit must accommodate the HTTP result limit and overflow signal",
-        path: ["drive", "maxTraversalNodes"],
+        message: "Drive content-search limit must not exceed traversal limit",
+        path: ["drive", "maxContentSearchFiles"],
       });
     }
   });
@@ -223,6 +225,9 @@ export type ServiceConfig = Readonly<{
         readonly maxMarkdownBytes: number;
         readonly maxTraversalNodes: number;
         readonly maxPages: number;
+        readonly maxPathDepth: number;
+        readonly maxMetadataChecks: number;
+        readonly maxContentSearchFiles: number;
         readonly maxResults: number;
       }>
     | Readonly<{
@@ -233,6 +238,9 @@ export type ServiceConfig = Readonly<{
         readonly maxMarkdownBytes: number;
         readonly maxTraversalNodes: number;
         readonly maxPages: number;
+        readonly maxPathDepth: number;
+        readonly maxMetadataChecks: number;
+        readonly maxContentSearchFiles: number;
         readonly maxResults: number;
       }>;
   readonly authentication: Readonly<{
@@ -242,6 +250,7 @@ export type ServiceConfig = Readonly<{
       readonly jwksUrl: string;
       readonly allowedAlgorithms: readonly AllowedJwtAlgorithm[];
       readonly clockToleranceSeconds: number;
+      readonly maxTokenLifetimeSeconds: number;
       readonly jwksTimeoutMs: number;
       readonly jwksCacheMaxAgeMs: number;
     }>;

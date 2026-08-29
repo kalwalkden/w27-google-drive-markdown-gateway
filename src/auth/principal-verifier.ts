@@ -23,6 +23,8 @@ export interface VerifiedWorkJwt {
   readonly payload: Readonly<{
     readonly iss?: unknown;
     readonly sub?: unknown;
+    readonly iat?: unknown;
+    readonly exp?: unknown;
   }>;
 }
 
@@ -38,6 +40,8 @@ export interface PrincipalVerifierDependencies {
    */
   readonly verifyWorkJwt?: WorkJwtVerifier;
   readonly readSecretText?: SecretTextReader;
+  /** Returns Unix time in seconds; injectable only to make temporal checks deterministic. */
+  readonly nowSeconds?: () => number;
 }
 
 function isCompactJwt(value: string): boolean {
@@ -99,6 +103,32 @@ function isSafePrincipalSubject(value: unknown): value is string {
   );
 }
 
+function hasValidWorkTokenLifetime(
+  payload: VerifiedWorkJwt["payload"],
+  maximumLifetimeSeconds: number,
+  clockToleranceSeconds: number,
+  nowSeconds: number,
+): boolean {
+  const { exp, iat } = payload;
+  if (
+    typeof iat !== "number" ||
+    typeof exp !== "number" ||
+    !Number.isFinite(iat) ||
+    !Number.isFinite(exp) ||
+    !Number.isFinite(nowSeconds) ||
+    exp <= iat
+  ) {
+    return false;
+  }
+  // Clock tolerance applies only to comparison with the verifier's clock. The
+  // issuer-signed claim interval itself must stay within the configured bound.
+  return (
+    iat <= nowSeconds + clockToleranceSeconds &&
+    exp >= nowSeconds - clockToleranceSeconds &&
+    exp - iat <= maximumLifetimeSeconds
+  );
+}
+
 async function readMountedSecret(
   reference: SecretFileReference,
   maximumBytes: number,
@@ -140,6 +170,7 @@ class ConfiguredPrincipalVerifier implements PrincipalVerifier {
     private readonly config: ServiceConfig,
     private readonly verifyWorkJwt: WorkJwtVerifier,
     private readonly readSecretText: SecretTextReader,
+    private readonly nowSeconds: () => number,
   ) {}
 
   async verify(authorization: unknown): Promise<AuthenticatedPrincipal> {
@@ -155,9 +186,16 @@ class ConfiguredPrincipalVerifier implements PrincipalVerifier {
   private async verifyWork(token: string): Promise<AuthenticatedPrincipal> {
     const verified = await this.verifyWorkJwt(token);
     const { iss, sub } = verified.payload;
+    const workMcp = this.config.authentication.workMcp;
     if (
-      iss !== this.config.authentication.workMcp.issuer ||
-      !isSafePrincipalSubject(sub)
+      iss !== workMcp.issuer ||
+      !isSafePrincipalSubject(sub) ||
+      !hasValidWorkTokenLifetime(
+        verified.payload,
+        workMcp.maxTokenLifetimeSeconds,
+        workMcp.clockToleranceSeconds,
+        this.nowSeconds(),
+      )
     ) {
       throw new Error("invalid verified claims");
     }
@@ -200,5 +238,6 @@ export function createPrincipalVerifier(
     config,
     dependencies.verifyWorkJwt ?? createConfiguredWorkJwtVerifier(config),
     dependencies.readSecretText ?? readMountedSecret,
+    dependencies.nowSeconds ?? (() => Date.now() / 1_000),
   );
 }

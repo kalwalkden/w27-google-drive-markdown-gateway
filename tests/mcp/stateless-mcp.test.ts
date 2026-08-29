@@ -45,6 +45,9 @@ function config() {
       maxMarkdownBytes: 1_000,
       maxTraversalNodes: 11,
       maxPages: 1,
+      maxPathDepth: 20,
+      maxMetadataChecks: 1_000,
+      maxContentSearchFiles: 10,
       maxResults: 10,
     },
     authentication: {
@@ -54,6 +57,7 @@ function config() {
         jwksUrl: "https://keys.invalid/jwks",
         allowedAlgorithms: ["RS256"],
         clockToleranceSeconds: 0,
+        maxTokenLifetimeSeconds: 3_600,
         jwksTimeoutMs: 100,
         jwksCacheMaxAgeMs: 1_000,
       },

@@ -29,6 +29,9 @@ function config() {
       maxMarkdownBytes: 1_000_000,
       maxTraversalNodes: 1_000,
       maxPages: 10,
+      maxPathDepth: 20,
+      maxMetadataChecks: 1_000,
+      maxContentSearchFiles: 10,
       maxResults: 100,
     },
     authentication: {
@@ -38,6 +41,7 @@ function config() {
         jwksUrl: "https://keys.invalid/tenant/jwks",
         allowedAlgorithms: ["RS256"],
         clockToleranceSeconds: 15,
+        maxTokenLifetimeSeconds: 3_600,
         jwksTimeoutMs: 5_000,
         jwksCacheMaxAgeMs: 60_000,
       },
@@ -58,10 +62,20 @@ function config() {
 }
 
 function fakeWorkJwt(
-  payload: Readonly<{ readonly iss?: unknown; readonly sub?: unknown }> = {
-    iss: "https://issuer.invalid/tenant",
-    sub: "work-subject",
-  },
+  payload: Readonly<{
+    readonly iss?: unknown;
+    readonly sub?: unknown;
+    readonly iat?: unknown;
+    readonly exp?: unknown;
+  }> = (() => {
+    const now = Date.now() / 1_000;
+    return {
+      iss: "https://issuer.invalid/tenant",
+      sub: "work-subject",
+      iat: now - 60,
+      exp: now + 60,
+    };
+  })(),
 ): WorkJwtVerifier {
   return async () => ({ payload });
 }
@@ -169,6 +183,46 @@ describe("principal verifier", () => {
       });
       await expectAuthenticationFailure(() =>
         unsafeSubject.verify(`Bearer ${workJwtShape()}`),
+      );
+    }
+  });
+
+  it("requires finite, clock-valid, and bounded Work JWT lifetime claims", async () => {
+    const valid = {
+      iss: "https://issuer.invalid/tenant",
+      sub: "work-subject",
+      iat: 990,
+      exp: 1_010,
+    };
+    const invalidPayloads = [
+      { ...valid, iat: undefined },
+      { ...valid, exp: undefined },
+      { ...valid, iat: Number.NaN },
+      { ...valid, exp: Number.POSITIVE_INFINITY },
+      { ...valid, iat: 1_016, exp: 1_020 },
+      { ...valid, iat: 970, exp: 984 },
+      { ...valid, iat: 1_000, exp: 1_000 },
+      { ...valid, iat: 1_001, exp: 1_000 },
+      { ...valid, iat: 900, exp: 4_501 },
+    ];
+
+    const validVerifier = createPrincipalVerifier(config(), {
+      verifyWorkJwt: fakeWorkJwt(valid),
+      readSecretText: reader(credential),
+      nowSeconds: () => 1_000,
+    });
+    await expect(
+      validVerifier.verify(`Bearer ${workJwtShape()}`),
+    ).resolves.toMatchObject({ kind: "work-mcp" });
+
+    for (const payload of invalidPayloads) {
+      const verifier = createPrincipalVerifier(config(), {
+        verifyWorkJwt: fakeWorkJwt(payload),
+        readSecretText: reader(credential),
+        nowSeconds: () => 1_000,
+      });
+      await expectAuthenticationFailure(() =>
+        verifier.verify(`Bearer ${workJwtShape()}`),
       );
     }
   });

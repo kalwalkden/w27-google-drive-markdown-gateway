@@ -23,6 +23,11 @@ bearer credential, OAuth credential object, refresh token, client secret, or ser
 in a Terraform variable, `tfvars` file, image layer, shell history, or log. This module accepts
 only existing secret identifiers and mounted versions.
 
+Work JWT verification also requires a finite issued-at (`iat`) and expiry (`exp`) claim. The
+deployment-owned `work_mcp_max_token_lifetime_seconds` setting defaults to 3600 seconds and must
+match the identity owner's approved issuance policy. Clock tolerance applies only when comparing
+those claims to the gateway clock; it does not extend the signed issued-to-expiry lifetime.
+
 ## Prepare and review a deployment
 
 1. Copy `infra/terraform/terraform.tfvars.example` to an operator-controlled location outside the

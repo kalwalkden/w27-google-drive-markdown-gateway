@@ -1,6 +1,6 @@
 # Tasks
 
-1. [ ] `001-bounded-tree-read-model` — Restore complete, duplicate-aware tree list/search/read with
+1. [x] `001-bounded-tree-read-model` — Restore complete, duplicate-aware tree list/search/read with
    request-local budgets and topology rechecks.
 2. [ ] `002-deployment-owned-write-authority` — Replace the expiring evidence lease with explicit
    default-off deployment authority and authenticated server-side Drive writes.

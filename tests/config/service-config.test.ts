@@ -12,6 +12,9 @@ function validConfig() {
       maxMarkdownBytes: 1_000_000,
       maxTraversalNodes: 1_000,
       maxPages: 10,
+      maxPathDepth: 20,
+      maxMetadataChecks: 1_000,
+      maxContentSearchFiles: 10,
       maxResults: 100,
     },
     authentication: {
@@ -21,6 +24,7 @@ function validConfig() {
         jwksUrl: "https://keys.invalid/tenant/jwks",
         allowedAlgorithms: ["RS256", "EdDSA"],
         clockToleranceSeconds: 15,
+        maxTokenLifetimeSeconds: 3_600,
         jwksTimeoutMs: 5_000,
         jwksCacheMaxAgeMs: 60_000,
       },
@@ -59,6 +63,9 @@ describe("service configuration", () => {
         maxMarkdownBytes: 1_000_000,
         maxTraversalNodes: 1_000,
         maxPages: 10,
+        maxPathDepth: 20,
+        maxMetadataChecks: 1_000,
+        maxContentSearchFiles: 10,
         maxResults: 100,
       },
     };
@@ -169,6 +176,34 @@ describe("service configuration", () => {
     ).toThrow();
   });
 
+  it("requires a bounded maximum Work JWT lifetime", () => {
+    expect(
+      parseServiceConfig(validConfig()).authentication.workMcp
+        .maxTokenLifetimeSeconds,
+    ).toBe(3_600);
+    for (const maxTokenLifetimeSeconds of [59, 86_401, 1.5, Number.NaN]) {
+      expect(() =>
+        parseServiceConfig({
+          ...validConfig(),
+          authentication: {
+            ...validConfig().authentication,
+            workMcp: {
+              ...validConfig().authentication.workMcp,
+              maxTokenLifetimeSeconds,
+            },
+          },
+        }),
+      ).toThrow();
+    }
+    const missingLifetime = validConfig();
+    delete (
+      missingLifetime.authentication.workMcp as {
+        maxTokenLifetimeSeconds?: number;
+      }
+    ).maxTokenLifetimeSeconds;
+    expect(() => parseServiceConfig(missingLifetime)).toThrow();
+  });
+
   it("requires finite HTTP bounds compatible with the Drive limits", () => {
     expect(parseServiceConfig(validConfig()).http.maxResultItems).toBe(100);
     expect(
@@ -189,8 +224,11 @@ describe("service configuration", () => {
     expect(() =>
       parseServiceConfig({
         ...validConfig(),
-        drive: { ...validConfig().drive, maxTraversalNodes: 100 },
+        drive: {
+          ...validConfig().drive,
+          maxContentSearchFiles: validConfig().drive.maxTraversalNodes + 1,
+        },
       }),
-    ).toThrow("Drive traversal limit must accommodate the HTTP result limit");
+    ).toThrow("Drive content-search limit must not exceed traversal limit");
   });
 });

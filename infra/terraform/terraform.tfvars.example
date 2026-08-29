@@ -10,6 +10,7 @@ codex_bearer_secret_id   = "replace-with-existing-codex-secret-id"
 work_mcp_issuer          = "https://issuer.example.invalid"
 work_mcp_audience        = "replace-with-audience"
 work_mcp_jwks_url        = "https://keys.example.invalid/jwks"
+work_mcp_max_token_lifetime_seconds = 3600
 
 # Required only for a reviewed full plan/apply that creates or changes Cloud Run.
 # Keep false for the reviewed Artifact Registry bootstrap apply.
