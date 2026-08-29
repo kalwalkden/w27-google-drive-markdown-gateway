@@ -19,6 +19,7 @@
     "build": "tsc -p tsconfig.build.json && node scripts/mark-cli-executable.mjs",
     "codex-cloud:harness": "node dist/codex-cloud/harness-cli.js",
     "migration:plan": "node dist/planning-migration/cli.js",
+    "migration:cutover-preflight": "node dist/planning-migration/cutover-preflight-cli.js",
     "drive:probe": "node dist/live-drive/cli.js",
     "verify:vendored-skills": "./scripts/verify-vendored-skills.sh",
     "check": "pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run test && pnpm run build && pnpm run verify:vendored-skills"
