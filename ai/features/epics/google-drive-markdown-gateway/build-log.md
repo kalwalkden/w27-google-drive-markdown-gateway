@@ -283,3 +283,18 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - Validation: full combined `CI=true pnpm check` passed with 175 tests after integrating concurrent
   Drive/API repairs. No live Work, Drive, JWT/JWKS, credential, or external network call ran.
 - Status: complete; independent task review pending
+
+## 2026-08-29 — Bounded enumeration and client-contract repair round
+
+- Drive review found a result cap could hide later children and therefore a duplicate. Public list
+  now uses a bounded cap-plus-one sentinel and returns a stable result-limit failure before metadata
+  or output; resolution, search, and create require complete enumeration and fail on continuation.
+- API review found runtime list composition used the Drive cap instead of the smaller HTTP result
+  cap. Runtime now wires `http.maxResultItems`, with a differing-limits regression.
+- MCP task review added safe handling for throwing write-session providers, well-formed Unicode at
+  every string schema, and exclusive success/error output validation.
+- The Codex diagnostics CLI is implemented with six strict commands, descriptor-based no-follow
+  file reads, bounded transport, exact response validation, stable JSON/exit behavior, and no retry.
+- Validation: full combined `CI=true pnpm check` passed with 191 tests, plus build, diff, and
+  vendored-skill checks. No live Drive, Work, Codex cloud, credentials, or external network ran.
+- Status: repairs complete; independent acceptance reruns pending
