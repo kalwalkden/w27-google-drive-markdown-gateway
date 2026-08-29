@@ -178,3 +178,15 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
   default-disabled write-session provision, bounded success/error envelopes, and allowlisted Pino
   events. Authentication alone never grants mutation authority.
 - Status: specification complete; implementation pending
+
+## 2026-08-29 — 02-authenticated-service-api / 002-json-api-and-redacted-audit-events
+
+- Implementation: `gpt-5.6-terra`, high reasoning for strict authenticated route ordering,
+  bounded per-principal work, deadline behavior, response limits, and allowlisted audit output.
+- Added the six JSON operations plus isolated health, stable public envelopes, default-disabled
+  write-session composition, Pino audit events, and fake-only route/limiter coverage.
+- Validation: full combined `CI=true pnpm check` passed with 131 tests, plus diff,
+  vendored-skill, and credential-pattern checks.
+- No credential, issuer/JWKS, live Drive, or external network call was made. A response deadline
+  cannot cancel an already-dispatched provider mutation, so write operations are never retried.
+- Status: complete; independent task review pending

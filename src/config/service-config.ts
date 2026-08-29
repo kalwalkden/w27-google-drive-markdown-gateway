@@ -2,7 +2,7 @@ import { isAbsolute } from "node:path";
 
 import { z } from "zod";
 
-import { folderId, type FolderId } from "../domain/markdown.js";
+import { type FolderId, folderId } from "../domain/markdown.js";
 
 const allowedJwtAlgorithms = [
   "RS256",
@@ -64,6 +64,20 @@ const httpsUrlSchema = z
 const boundedPositiveInteger = (minimum: number, maximum: number) =>
   z.number().int().min(minimum).max(maximum);
 
+const httpSchema = z
+  .object({
+    maxRequestMarkdownBytes: boundedPositiveInteger(1, 1_048_576),
+    maxJsonBodyBytes: boundedPositiveInteger(4_096, 6_295_552),
+    maxResultItems: boundedPositiveInteger(1, 100),
+    maxJsonResponseBytes: boundedPositiveInteger(4_096, 6_295_552),
+    requestTimeoutMs: boundedPositiveInteger(100, 30_000),
+    rateLimitWindowMs: boundedPositiveInteger(1_000, 60_000),
+    maxRequestsPerWindow: boundedPositiveInteger(1, 120),
+    maxConcurrentRequestsPerPrincipal: boundedPositiveInteger(1, 16),
+    maxRateLimitPrincipals: boundedPositiveInteger(1, 10_000),
+  })
+  .strict();
+
 const driveSchema = z
   .discriminatedUnion("authMode", [
     z
@@ -104,6 +118,7 @@ const driveSchema = z
 const serviceConfigSchema = z
   .object({
     drive: driveSchema,
+    http: httpSchema,
     authentication: z
       .object({
         workMcp: z
@@ -142,7 +157,31 @@ const serviceConfigSchema = z
       })
       .strict(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    const { http, drive } = value;
+    if (http.maxRequestMarkdownBytes > drive.maxMarkdownBytes) {
+      context.addIssue({
+        code: "custom",
+        message: "HTTP request Markdown limit must not exceed Drive limit",
+        path: ["http", "maxRequestMarkdownBytes"],
+      });
+    }
+    if (http.maxJsonBodyBytes < http.maxRequestMarkdownBytes * 6 + 4_096) {
+      context.addIssue({
+        code: "custom",
+        message: "HTTP JSON body limit must accommodate escaped Markdown",
+        path: ["http", "maxJsonBodyBytes"],
+      });
+    }
+    if (http.maxResultItems > drive.maxResults) {
+      context.addIssue({
+        code: "custom",
+        message: "HTTP result limit must not exceed Drive result limit",
+        path: ["http", "maxResultItems"],
+      });
+    }
+  });
 
 export type ServiceConfig = Readonly<{
   readonly drive:
@@ -179,6 +218,17 @@ export type ServiceConfig = Readonly<{
     readonly codex: Readonly<{
       readonly bearerSecretFile: SecretFileReference;
     }>;
+  }>;
+  readonly http: Readonly<{
+    readonly maxRequestMarkdownBytes: number;
+    readonly maxJsonBodyBytes: number;
+    readonly maxResultItems: number;
+    readonly maxJsonResponseBytes: number;
+    readonly requestTimeoutMs: number;
+    readonly rateLimitWindowMs: number;
+    readonly maxRequestsPerWindow: number;
+    readonly maxConcurrentRequestsPerPrincipal: number;
+    readonly maxRateLimitPrincipals: number;
   }>;
 }>;
 

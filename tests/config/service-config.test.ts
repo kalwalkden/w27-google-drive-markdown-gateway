@@ -26,6 +26,17 @@ function validConfig() {
       },
       codex: { bearerSecretFile: "/var/run/secrets/codex-bearer" },
     },
+    http: {
+      maxRequestMarkdownBytes: 1_000_000,
+      maxJsonBodyBytes: 6_004_096,
+      maxResultItems: 100,
+      maxJsonResponseBytes: 1_000_000,
+      requestTimeoutMs: 5_000,
+      rateLimitWindowMs: 60_000,
+      maxRequestsPerWindow: 60,
+      maxConcurrentRequestsPerPrincipal: 4,
+      maxRateLimitPrincipals: 1_000,
+    },
   };
 }
 
@@ -134,5 +145,18 @@ describe("service configuration", () => {
         },
       }),
     ).toThrow();
+  });
+
+  it("requires finite HTTP bounds compatible with the Drive limits", () => {
+    expect(parseServiceConfig(validConfig()).http.maxResultItems).toBe(100);
+    for (const http of [
+      { ...validConfig().http, maxRequestMarkdownBytes: 1_000_001 },
+      { ...validConfig().http, maxJsonBodyBytes: 6_004_095 },
+      { ...validConfig().http, maxResultItems: 101 },
+      { ...validConfig().http, requestTimeoutMs: 99 },
+      { ...validConfig().http, maxRateLimitPrincipals: 10_001 },
+    ]) {
+      expect(() => parseServiceConfig({ ...validConfig(), http })).toThrow();
+    }
   });
 });

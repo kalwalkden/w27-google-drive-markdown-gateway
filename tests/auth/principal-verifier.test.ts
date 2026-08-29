@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
-
-import { parseServiceConfig } from "../../src/config/service-config.js";
 import { AuthenticationError } from "../../src/auth/principal.js";
 import {
   createPrincipalVerifier,
   type SecretTextReader,
   type WorkJwtVerifier,
 } from "../../src/auth/principal-verifier.js";
+import { parseServiceConfig } from "../../src/config/service-config.js";
 
 function credential(seed = 0): string {
   return Buffer.from(
@@ -43,6 +42,17 @@ function config() {
         jwksCacheMaxAgeMs: 60_000,
       },
       codex: { bearerSecretFile: "/var/run/secrets/codex-bearer" },
+    },
+    http: {
+      maxRequestMarkdownBytes: 1_000_000,
+      maxJsonBodyBytes: 6_004_096,
+      maxResultItems: 100,
+      maxJsonResponseBytes: 1_000_000,
+      requestTimeoutMs: 5_000,
+      rateLimitWindowMs: 60_000,
+      maxRequestsPerWindow: 60,
+      maxConcurrentRequestsPerPrincipal: 4,
+      maxRateLimitPrincipals: 1_000,
     },
   });
 }
