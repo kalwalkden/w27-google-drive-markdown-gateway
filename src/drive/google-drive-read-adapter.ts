@@ -1,0 +1,606 @@
+import {
+  fileId,
+  folderId,
+  isMarkdownName,
+  revision,
+  type FileId,
+  type FolderId,
+  type Revision,
+} from "../domain/markdown.js";
+import type {
+  ConditionalWriteResult,
+  DriveNode,
+  DrivePort,
+  DriveRead,
+  DriveSearchHit,
+} from "./drive-port.js";
+import {
+  createGoogleDriveApi,
+  type GoogleDriveApi,
+  type GoogleDriveAuthConfig,
+} from "./google-drive-auth.js";
+
+const folderMimeType = "application/vnd.google-apps.folder";
+const shortcutMimeType = "application/vnd.google-apps.shortcut";
+const metadataFields =
+  "id,name,mimeType,parents,modifiedTime,size,version,trashed,driveId,shortcutDetails";
+const defaultMaxReadBytes = 1_000_000;
+const defaultMaxTraversalNodes = 1_000;
+const defaultMaxPages = 100;
+const defaultRootCacheTtlMs = 60_000;
+const notFound = Symbol("google-drive-not-found");
+
+type ProviderOperation =
+  | "root-validation"
+  | "get-metadata"
+  | "list-children"
+  | "read-media"
+  | "write-disabled";
+
+export type GoogleDriveProviderFailure =
+  | "authentication"
+  | "not-found"
+  | "throttled"
+  | "transient"
+  | "malformed"
+  | "limit"
+  | "configuration";
+
+/** A deliberately redacted provider failure safe for future transport mapping. */
+export class GoogleDriveProviderError extends Error {
+  constructor(
+    readonly failure: GoogleDriveProviderFailure,
+    readonly operation: ProviderOperation,
+    readonly status?: number,
+  ) {
+    super(`Google Drive ${operation} failed: ${failure}.`);
+    this.name = "GoogleDriveProviderError";
+  }
+}
+
+export type GoogleDriveReadAdapterConfig = Readonly<{
+  rootFolderId: FolderId;
+  auth: GoogleDriveAuthConfig;
+  /** The expected Shared Drive ID; forbidden for My Drive mode. */
+  sharedDriveId?: string;
+  maxReadBytes?: number;
+  maxTraversalNodes?: number;
+  maxPages?: number;
+  rootCacheTtlMs?: number;
+}>;
+
+interface RootContext {
+  readonly node: DriveNode;
+  readonly driveId?: string;
+  readonly expiresAt: number;
+}
+
+interface DriveFileResource {
+  readonly id?: unknown;
+  readonly name?: unknown;
+  readonly mimeType?: unknown;
+  readonly parents?: unknown;
+  readonly modifiedTime?: unknown;
+  readonly size?: unknown;
+  readonly version?: unknown;
+  readonly trashed?: unknown;
+  readonly driveId?: unknown;
+}
+
+export class GoogleDriveReadAdapter implements DrivePort {
+  private readonly maxReadBytes: number;
+  private readonly maxTraversalNodes: number;
+  private readonly maxPages: number;
+  private readonly rootCacheTtlMs: number;
+  private root?: RootContext;
+  private rootPromise?: Promise<RootContext>;
+  private rootGeneration = 0;
+
+  constructor(
+    private readonly config: GoogleDriveReadAdapterConfig,
+    private readonly api: GoogleDriveApi = createGoogleDriveApi(config.auth),
+    private readonly now: () => number = Date.now,
+  ) {
+    this.maxReadBytes = config.maxReadBytes ?? defaultMaxReadBytes;
+    this.maxTraversalNodes =
+      config.maxTraversalNodes ?? defaultMaxTraversalNodes;
+    this.maxPages = config.maxPages ?? defaultMaxPages;
+    this.rootCacheTtlMs = config.rootCacheTtlMs ?? defaultRootCacheTtlMs;
+    this.validateConfig();
+  }
+
+  invalidateRootContext(): void {
+    this.root = undefined;
+    this.rootGeneration += 1;
+  }
+
+  async getNode(id: FileId | FolderId): Promise<DriveNode | undefined> {
+    const root = await this.ensureRoot();
+    if (id === this.config.rootFolderId) return root.node;
+    return this.fetchMetadata(id, "get-metadata");
+  }
+
+  async listChildren(folder: FolderId): Promise<readonly DriveNode[]> {
+    const root = await this.ensureRoot();
+    const result: DriveNode[] = [];
+    let pageToken: string | undefined;
+    let pages = 0;
+    do {
+      if (pages >= this.maxPages)
+        throw new GoogleDriveProviderError("limit", "list-children");
+      const data = await this.callList({
+        q: `'${escapeDriveQueryLiteral(folder)}' in parents and trashed = false`,
+        fields: `nextPageToken,files(${metadataFields})`,
+        pageSize: 100,
+        pageToken,
+        supportsAllDrives: true,
+        ...(root.driveId
+          ? {
+              corpora: "drive",
+              driveId: root.driveId,
+              includeItemsFromAllDrives: true,
+            }
+          : { corpora: "user" }),
+      });
+      pages += 1;
+      const page = parseListResource(data, "list-children");
+      for (const resource of page.files) {
+        if (result.length >= this.maxTraversalNodes)
+          throw new GoogleDriveProviderError("limit", "list-children");
+        result.push(normalizeNode(resource, "list-children"));
+      }
+      pageToken = page.nextPageToken;
+    } while (pageToken);
+    return result;
+  }
+
+  async listDescendants(
+    folder: FolderId,
+    options: Readonly<{ recursive: boolean; limit: number }>,
+  ): Promise<readonly DriveNode[]> {
+    if (
+      typeof options.recursive !== "boolean" ||
+      !Number.isSafeInteger(options.limit) ||
+      options.limit < 1
+    )
+      throw new GoogleDriveProviderError("configuration", "list-children");
+    await this.ensureRoot();
+    const result: DriveNode[] = [];
+    const queue: FolderId[] = [folder];
+    const visited = new Set<string>();
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current || visited.has(current)) continue;
+      if (visited.size >= this.maxTraversalNodes)
+        throw new GoogleDriveProviderError("limit", "list-children");
+      visited.add(current);
+      for (const child of await this.listChildren(current)) {
+        if (
+          result.length >= options.limit ||
+          result.length >= this.maxTraversalNodes
+        )
+          throw new GoogleDriveProviderError("limit", "list-children");
+        result.push(child);
+        if (options.recursive && child.kind === "folder") {
+          if (queue.length + visited.size >= this.maxTraversalNodes)
+            throw new GoogleDriveProviderError("limit", "list-children");
+          queue.push(child.id as FolderId);
+        }
+      }
+    }
+    return result;
+  }
+
+  async searchDescendants(
+    folder: FolderId,
+    query: string,
+    limit: number,
+  ): Promise<readonly DriveSearchHit[]> {
+    if (
+      typeof query !== "string" ||
+      query.length === 0 ||
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > this.maxTraversalNodes
+    )
+      throw new GoogleDriveProviderError("configuration", "list-children");
+    const candidates = await this.listDescendants(folder, {
+      recursive: true,
+      limit: this.maxTraversalNodes,
+    });
+    const needle = query.toLocaleLowerCase();
+    const result: DriveSearchHit[] = [];
+    for (const candidate of candidates) {
+      if (result.length >= limit) break;
+      const nameMatch = candidate.name.toLocaleLowerCase().includes(needle);
+      if (nameMatch) {
+        result.push({ node: candidate });
+        continue;
+      }
+      if (candidate.kind !== "file") {
+        continue;
+      }
+      if (
+        !isMarkdownName(candidate.name) ||
+        candidate.size === undefined ||
+        candidate.size > this.maxReadBytes ||
+        candidate.mimeType?.startsWith("application/vnd.google-apps.")
+      ) {
+        continue;
+      }
+      const read = await this.readFile(candidate.id as FileId);
+      if (!read) continue;
+      const matchIndex = read.content.toLocaleLowerCase().indexOf(needle);
+      if (matchIndex >= 0) {
+        result.push({
+          node: read.node,
+          ...(matchIndex >= 0
+            ? { excerpt: excerptAround(read.content, matchIndex, query.length) }
+            : {}),
+        });
+      }
+    }
+    return result;
+  }
+
+  async readFile(id: FileId): Promise<DriveRead | undefined> {
+    await this.ensureRoot();
+    const node = await this.fetchMetadata(id, "get-metadata");
+    if (!node) return undefined;
+    if (
+      node.kind !== "file" ||
+      node.size === undefined ||
+      node.revision === undefined ||
+      node.size > this.maxReadBytes ||
+      node.mimeType?.startsWith("application/vnd.google-apps.")
+    ) {
+      throw new GoogleDriveProviderError("malformed", "read-media");
+    }
+    const response = await this.callGet(
+      {
+        fileId: id,
+        alt: "media",
+        responseType: "arraybuffer",
+        supportsAllDrives: true,
+      },
+      "read-media",
+    );
+    const bytes = toBytes(response);
+    if (bytes.byteLength > this.maxReadBytes || bytes.byteLength !== node.size)
+      throw new GoogleDriveProviderError("malformed", "read-media");
+    let content: string;
+    try {
+      content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      throw new GoogleDriveProviderError("malformed", "read-media");
+    }
+    return { node, content };
+  }
+
+  async createFile(
+    _parentId: FolderId,
+    _name: string,
+    _content: string,
+  ): Promise<DriveNode> {
+    return unsupportedWrite();
+  }
+
+  async updateFile(
+    _fileId: FileId,
+    _expectedRevision: Revision,
+    _content: string,
+  ): Promise<ConditionalWriteResult> {
+    return { outcome: "unsupported" };
+  }
+
+  async moveFile(
+    _fileId: FileId,
+    _expectedRevision: Revision,
+    _destinationFolderId: FolderId,
+  ): Promise<ConditionalWriteResult> {
+    return { outcome: "unsupported" };
+  }
+
+  private validateConfig(): void {
+    if (
+      typeof this.config.rootFolderId !== "string" ||
+      this.config.rootFolderId.trim().length === 0
+    )
+      throw new GoogleDriveProviderError("configuration", "root-validation");
+    for (const value of [
+      this.maxReadBytes,
+      this.maxTraversalNodes,
+      this.maxPages,
+      this.rootCacheTtlMs,
+    ]) {
+      if (!Number.isSafeInteger(value) || value < 1)
+        throw new GoogleDriveProviderError("configuration", "root-validation");
+    }
+    if (
+      this.config.auth.mode === "shared-drive-adc" &&
+      (typeof this.config.sharedDriveId !== "string" ||
+        this.config.sharedDriveId.trim().length === 0)
+    ) {
+      throw new GoogleDriveProviderError("configuration", "root-validation");
+    }
+    if (
+      this.config.auth.mode === "my-drive-refresh-token" &&
+      this.config.sharedDriveId !== undefined
+    ) {
+      throw new GoogleDriveProviderError("configuration", "root-validation");
+    }
+    if (
+      this.config.auth.mode === "my-drive-refresh-token" &&
+      Object.values(this.config.auth.credentials).some(
+        (credential) =>
+          typeof credential !== "string" || credential.trim().length === 0,
+      )
+    ) {
+      throw new GoogleDriveProviderError("configuration", "root-validation");
+    }
+  }
+
+  private async ensureRoot(): Promise<RootContext> {
+    if (this.root && this.root.expiresAt > this.sampleNow()) return this.root;
+    if (this.rootPromise) return this.rootPromise;
+    const generation = this.rootGeneration;
+    const pending = this.validateRoot(generation);
+    this.rootPromise = pending;
+    try {
+      return await pending;
+    } finally {
+      if (this.rootPromise === pending) this.rootPromise = undefined;
+    }
+  }
+
+  private async validateRoot(generation: number): Promise<RootContext> {
+    const rootResource = await this.fetchMetadataWithDriveId(
+      this.config.rootFolderId,
+      "root-validation",
+    );
+    const root = rootResource?.node;
+    if (!root || root.id !== this.config.rootFolderId || root.kind !== "folder")
+      throw new GoogleDriveProviderError("configuration", "root-validation");
+    const driveId = this.driveIdForRoot(rootResource.driveId);
+    const context = {
+      node: root,
+      driveId,
+      expiresAt: this.sampleNow() + this.rootCacheTtlMs,
+    };
+    if (generation === this.rootGeneration) this.root = context;
+    return context;
+  }
+
+  private driveIdForRoot(rootDriveId: string | undefined): string | undefined {
+    if (this.config.auth.mode === "shared-drive-adc") {
+      if (rootDriveId !== this.config.sharedDriveId)
+        throw new GoogleDriveProviderError("configuration", "root-validation");
+      return rootDriveId;
+    }
+    if (rootDriveId !== undefined)
+      throw new GoogleDriveProviderError("configuration", "root-validation");
+    return undefined;
+  }
+
+  private async fetchMetadata(
+    id: FileId | FolderId,
+    operation: ProviderOperation,
+  ): Promise<DriveNode | undefined> {
+    return (await this.fetchMetadataWithDriveId(id, operation))?.node;
+  }
+
+  private async fetchMetadataWithDriveId(
+    id: FileId | FolderId,
+    operation: ProviderOperation,
+  ): Promise<Readonly<{ node: DriveNode; driveId?: string }> | undefined> {
+    const data = await this.callGet(
+      { fileId: id, fields: metadataFields, supportsAllDrives: true },
+      operation,
+    );
+    if (data === notFound) return undefined;
+    const resource = data as DriveFileResource;
+    return {
+      node: normalizeNode(resource, operation),
+      driveId: requiredOptionalString(resource.driveId, operation),
+    };
+  }
+
+  private async callGet(
+    request: Readonly<Record<string, unknown>>,
+    operation: ProviderOperation,
+  ): Promise<unknown | typeof notFound> {
+    try {
+      return (await this.api.files.get(request)).data;
+    } catch (error) {
+      const failure = normalizeFailure(error, operation);
+      if (failure.failure === "not-found" && operation === "get-metadata")
+        return notFound;
+      throw failure;
+    }
+  }
+
+  private sampleNow(): number {
+    let value: number;
+    try {
+      value = this.now();
+    } catch {
+      throw new GoogleDriveProviderError("configuration", "root-validation");
+    }
+    if (!Number.isFinite(value))
+      throw new GoogleDriveProviderError("configuration", "root-validation");
+    return value;
+  }
+
+  private async callList(
+    request: Readonly<Record<string, unknown>>,
+  ): Promise<unknown> {
+    try {
+      return (await this.api.files.list(request)).data;
+    } catch (error) {
+      throw normalizeFailure(error, "list-children");
+    }
+  }
+}
+
+export function createGoogleDriveReadAdapter(
+  config: GoogleDriveReadAdapterConfig,
+): GoogleDriveReadAdapter {
+  return new GoogleDriveReadAdapter(config);
+}
+
+function unsupportedWrite(): never {
+  throw new GoogleDriveProviderError("configuration", "write-disabled");
+}
+
+function parseListResource(
+  value: unknown,
+  operation: ProviderOperation,
+): { files: readonly DriveFileResource[]; nextPageToken?: string } {
+  if (!isRecord(value) || !Array.isArray(value.files))
+    throw new GoogleDriveProviderError("malformed", operation);
+  if (
+    value.nextPageToken !== undefined &&
+    (typeof value.nextPageToken !== "string" ||
+      value.nextPageToken.length === 0)
+  ) {
+    throw new GoogleDriveProviderError("malformed", operation);
+  }
+  return {
+    files: value.files as DriveFileResource[],
+    nextPageToken: value.nextPageToken,
+  };
+}
+
+function normalizeNode(
+  value: DriveFileResource,
+  operation: ProviderOperation,
+): DriveNode {
+  if (!isRecord(value))
+    throw new GoogleDriveProviderError("malformed", operation);
+  const id = requiredString(value.id, operation);
+  const name = requiredString(value.name, operation);
+  const mimeType = requiredString(value.mimeType, operation);
+  const modifiedTime = requiredTimestamp(value.modifiedTime, operation);
+  if (value.trashed !== false)
+    throw new GoogleDriveProviderError("malformed", operation);
+  if (!Array.isArray(value.parents) || !value.parents.every(isNonemptyString))
+    throw new GoogleDriveProviderError("malformed", operation);
+  const parentIds = value.parents.map(folderId);
+  if (mimeType === folderMimeType) {
+    return {
+      id: folderId(id),
+      name,
+      kind: "folder",
+      parentIds,
+      modifiedTime,
+      mimeType,
+    };
+  }
+  if (mimeType === shortcutMimeType) {
+    return {
+      id: fileId(id),
+      name,
+      kind: "shortcut",
+      parentIds,
+      modifiedTime,
+      mimeType,
+    };
+  }
+  const size = parseSize(value.size, operation);
+  const version = requiredString(value.version, operation);
+  return {
+    id: fileId(id),
+    name,
+    kind: "file",
+    parentIds,
+    modifiedTime,
+    revision: revision(version),
+    size,
+    mimeType,
+  };
+}
+
+function normalizeFailure(
+  error: unknown,
+  operation: ProviderOperation,
+): GoogleDriveProviderError {
+  if (error instanceof GoogleDriveProviderError) return error;
+  const status = statusFromError(error);
+  if (status === 401 || status === 403)
+    return new GoogleDriveProviderError("authentication", operation, status);
+  if (status === 404)
+    return new GoogleDriveProviderError("not-found", operation, status);
+  if (status === 429)
+    return new GoogleDriveProviderError("throttled", operation, status);
+  if (status !== undefined && status >= 500)
+    return new GoogleDriveProviderError("transient", operation, status);
+  return new GoogleDriveProviderError("transient", operation, status);
+}
+
+function statusFromError(error: unknown): number | undefined {
+  if (!isRecord(error)) return undefined;
+  const response = error.response;
+  if (isRecord(response) && typeof response.status === "number")
+    return response.status;
+  return typeof error.status === "number" ? error.status : undefined;
+}
+
+function requiredString(value: unknown, operation: ProviderOperation): string {
+  if (!isNonemptyString(value))
+    throw new GoogleDriveProviderError("malformed", operation);
+  return value;
+}
+
+function requiredOptionalString(
+  value: unknown,
+  operation: ProviderOperation,
+): string | undefined {
+  if (value === undefined) return undefined;
+  return requiredString(value, operation);
+}
+
+function requiredTimestamp(
+  value: unknown,
+  operation: ProviderOperation,
+): string {
+  const timestamp = requiredString(value, operation);
+  if (Number.isNaN(Date.parse(timestamp)))
+    throw new GoogleDriveProviderError("malformed", operation);
+  return timestamp;
+}
+
+function parseSize(value: unknown, operation: ProviderOperation): number {
+  if (typeof value !== "string" || !/^\d+$/u.test(value))
+    throw new GoogleDriveProviderError("malformed", operation);
+  const size = Number(value);
+  if (!Number.isSafeInteger(size))
+    throw new GoogleDriveProviderError("malformed", operation);
+  return size;
+}
+
+function escapeDriveQueryLiteral(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll("'", "\\'");
+}
+
+function excerptAround(
+  content: string,
+  index: number,
+  queryLength: number,
+): string {
+  return content.slice(Math.max(0, index - 20), index + queryLength + 20);
+}
+
+function toBytes(value: unknown): Uint8Array {
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (ArrayBuffer.isView(value))
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  throw new GoogleDriveProviderError("malformed", "read-media");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isNonemptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}

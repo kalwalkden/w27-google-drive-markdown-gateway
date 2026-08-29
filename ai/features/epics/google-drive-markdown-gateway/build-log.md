@@ -103,3 +103,15 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
   credential-pattern scan passed.
 - No live Drive request, signing, credential discovery, or production write occurred. Feature status
   remains open pending the independent review rerun and its separate archival gate.
+
+## 2026-08-29 — 01-drive-core / 002-google-drive-read-adapter
+
+- Implementation: `gpt-5.6-terra`, high reasoning because this boundary handles two authentication
+  modes, Shared Drive topology, provider response normalization, and root-confined traversal.
+- Root review tightened malformed-success handling, runtime credential validation, and cache-clock
+  failure behavior so every edge case stays inside the redacted provider-error boundary.
+- Validation: frozen install, focused adapter tests, full combined `CI=true pnpm check` (88 tests),
+  diff check, vendored-skill verification, and a credential-pattern scan passed.
+- All tests use an injected fake Google API. No token exchange, credential discovery, network call,
+  live Drive request, or Drive mutation occurred; production writes remain disabled.
+- Status: complete
