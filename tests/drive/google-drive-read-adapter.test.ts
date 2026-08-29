@@ -331,7 +331,7 @@ describe("GoogleDriveReadAdapter", () => {
     ).rejects.toMatchObject({ failure: "limit", operation: "list-children" });
     await expect(
       service
-        .openWriteSession({} as never)
+        .openWriteSession()
         .createMarkdown({ path: "new.md", content: "new" }),
     ).rejects.toMatchObject({ failure: "limit", operation: "list-children" });
   });

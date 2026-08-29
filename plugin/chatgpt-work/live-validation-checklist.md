@@ -14,7 +14,7 @@ endpoint.
   allowed algorithms, and principal match the deployment-owned `workMcp`
   configuration. Never paste a JWT or secret into package fields.
 - Confirm the adapter presents exactly the six expected tools and the gateway
-  write gate remains independently fail closed. The current production runtime
+  deployment write mode remains default-disabled. The current production runtime
   has no write session, so every create, update, and archive request must
   return `UNSUPPORTED`.
 

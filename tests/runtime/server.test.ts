@@ -118,6 +118,101 @@ describe("runtime composition", () => {
     expect(writeSessionProvider).toBeUndefined();
   });
 
+  it("composes one server-side writer only when deployment write mode is enabled", async () => {
+    const parsed = JSON.parse(config("shared-drive-adc")) as {
+      write?: { enabled: boolean };
+    };
+    parsed.write = { enabled: true };
+    let writeAuthCalls = 0;
+    let writeAdapterCalls = 0;
+    let apiWriteSession: unknown;
+    await composeRuntime(JSON.stringify(parsed), {
+      ...runtimeDependencies([]),
+      createWriteRawHttp: (auth) => {
+        writeAuthCalls += 1;
+        expect(auth).toEqual({ mode: "shared-drive-adc" });
+        return {
+          async send() {
+            return {
+              status: 500,
+              headers: new Headers(),
+              body: new Uint8Array(),
+            };
+          },
+        };
+      },
+      createWriteAdapter: () => {
+        writeAdapterCalls += 1;
+        return {
+          async createFile() {
+            return { outcome: "unsupported" as const };
+          },
+          async updateFile() {
+            return { outcome: "unsupported" as const };
+          },
+          async moveFile() {
+            return { outcome: "unsupported" as const };
+          },
+        };
+      },
+      createApiApp: (dependencies) => {
+        apiWriteSession = dependencies.writeSessionProvider;
+        return express();
+      },
+      createMcpApp: (dependencies) => {
+        expect(dependencies.writeSessionProvider).toBeUndefined();
+        return express();
+      },
+    });
+    expect(writeAuthCalls).toBe(1);
+    expect(writeAdapterCalls).toBe(1);
+    expect(apiWriteSession).toBeUndefined();
+  });
+
+  it("does not invoke write factories when write mode is absent or disabled", async () => {
+    for (const enabled of [undefined, false]) {
+      const parsed = JSON.parse(config("shared-drive-adc")) as {
+        write?: { enabled: boolean };
+      };
+      if (enabled !== undefined) parsed.write = { enabled };
+      await composeRuntime(JSON.stringify(parsed), {
+        ...runtimeDependencies([]),
+        createWriteRawHttp: () => {
+          throw new Error("write auth must remain unconstructed");
+        },
+      });
+    }
+  });
+
+  it("rejects an invalid enabled write factory before listening", async () => {
+    const parsed = JSON.parse(config("shared-drive-adc")) as {
+      write?: { enabled: boolean };
+    };
+    parsed.write = { enabled: true };
+    let listened = false;
+    await expect(
+      startRuntime({
+        ...runtimeDependencies([]),
+        environment: { GATEWAY_SERVICE_CONFIG_JSON: JSON.stringify(parsed) },
+        createWriteRawHttp: () => ({
+          async send() {
+            return {
+              status: 500,
+              headers: new Headers(),
+              body: new Uint8Array(),
+            };
+          },
+        }),
+        createWriteAdapter: () => ({}) as never,
+        listen: () => {
+          listened = true;
+          return { close() {} };
+        },
+      }),
+    ).rejects.toThrow("GuardedDriveWritePort requires a raw Drive write port.");
+    expect(listened).toBe(false);
+  });
+
   it("uses the smaller HTTP result cap for service list enumeration", async () => {
     const parsed = JSON.parse(config("shared-drive-adc")) as {
       http: { maxResultItems: number };

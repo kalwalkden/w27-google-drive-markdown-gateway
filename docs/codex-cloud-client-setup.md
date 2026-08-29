@@ -52,7 +52,7 @@ Load `$codex-cloud-markdown-gateway`. Read before writing and retain the
 revision. Use one explicit update. On `CONFLICT`, reread and ask; on timeout or
 transport uncertainty, do not retry a mutation and reread before any later
 action. `UNAUTHENTICATED` means check the scoped injected bearer;
-`UNSUPPORTED` means the independently controlled write session/gate is not
+`UNSUPPORTED` means the independently controlled write session is not
 available. Explicit archive intent is required. Do not substitute raw HTTP,
 `curl`, a cloud egress policy, or a passing client check for write authority.
 
@@ -64,8 +64,8 @@ behavior. Run it only in a clean, operator-configured cloud environment with a
 dedicated validation location and external output path, after current platform
 controls and gateway deployment are verified. With the current gateway it emits
 a timestamped, sanitized **blocked** record without list, search, read, create,
-update, or archive calls. It is evidence only: a missing lease, direct-root-only
-topology, disabled write, or unavailable archive blocks release validation and
+update, or archive calls. It is evidence only: direct-root-only topology,
+disabled write, or unavailable archive blocks release validation and
 never authorizes a bypass.
 
 If a future reviewed harness attempts create and receives an uncertain transport

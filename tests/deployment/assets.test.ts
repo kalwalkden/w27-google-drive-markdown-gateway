@@ -50,6 +50,14 @@ describe("deployment assets", () => {
     expect(cloudRun).toContain(
       "maxResultItems                    = var.max_result_items",
     );
+    for (const projection of [
+      "maxPathDepth      = var.max_path_depth",
+      "maxMetadataChecks = var.max_metadata_checks",
+      "maxContentSearchFiles = var.max_content_search_files",
+    ]) {
+      expect(cloudRun.split(projection)).toHaveLength(3);
+    }
+    expect(cloudRun).toContain("enabled = var.enable_write");
     expect(secrets).toContain("roles/secretmanager.secretAccessor");
     expect(secrets).not.toMatch(/secret_data|service_account_key/u);
     expect(outputs).not.toMatch(/secret|config|token|service_account/iu);
@@ -71,6 +79,11 @@ describe("deployment assets", () => {
       "rate_limit_window_ms",
       "max_concurrent_requests_per_principal",
       "max_rate_limit_principals",
+      "max_path_depth",
+      "max_metadata_checks",
+      "max_content_search_files",
+      "enable_write",
+      "acknowledge_write_risk",
     ]) {
       expect(variables).toContain(`variable "${variable}"`);
     }
@@ -79,6 +92,12 @@ describe("deployment assets", () => {
       "max_json_body_bytes >= var.max_request_markdown_bytes * 6 + 4096",
     );
     expect(cloudRun).toContain("max_result_items <= var.max_results");
+    expect(cloudRun).toContain(
+      "!var.enable_write || var.acknowledge_write_risk",
+    );
+    expect(cloudRun).toContain(
+      "max_content_search_files <= var.max_traversal_nodes",
+    );
     expect(cloudRun).toContain(
       'var.cpu != "1" || contains(["512Mi", "1Gi", "2Gi", "4Gi"], var.memory)',
     );
@@ -105,5 +124,6 @@ describe("deployment assets", () => {
     );
     expect(document).toContain("acknowledge_production_service_apply=true");
     expect(document).toContain("acknowledge_public_invoker");
+    expect(document).toContain("acknowledge_write_risk");
   });
 });

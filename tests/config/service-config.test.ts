@@ -45,6 +45,24 @@ function validConfig() {
 }
 
 describe("service configuration", () => {
+  it("normalizes absent write mode to disabled and accepts only a strict boolean mode", () => {
+    expect(parseServiceConfig(validConfig()).write).toEqual({ enabled: false });
+    expect(
+      parseServiceConfig({ ...validConfig(), write: { enabled: true } }).write,
+    ).toEqual({ enabled: true });
+    expect(
+      parseServiceConfig({ ...validConfig(), write: { enabled: false } }).write,
+    ).toEqual({ enabled: false });
+    for (const write of [
+      true,
+      {},
+      { enabled: "true" },
+      { enabled: false, extra: true },
+    ]) {
+      expect(() => parseServiceConfig({ ...validConfig(), write })).toThrow();
+    }
+  });
+
   it("parses both supported Drive authentication shapes without reading references", () => {
     const shared = parseServiceConfig(validConfig());
     expect(shared.drive).toMatchObject({

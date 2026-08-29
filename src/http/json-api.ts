@@ -365,7 +365,7 @@ function isUnsupportedBodyParserMediaError(error: unknown): boolean {
 
 /**
  * Builds the route-only API. It deliberately accepts a pre-issued write session rather than any
- * write-gate input; an HTTP timeout cannot cancel a dispatched Drive promise and never retries it.
+ * deployment authority input; an HTTP timeout cannot cancel a dispatched Drive promise and never retries it.
  */
 export function createJsonApiApp(dependencies: JsonApiDependencies): Express {
   const app = express();

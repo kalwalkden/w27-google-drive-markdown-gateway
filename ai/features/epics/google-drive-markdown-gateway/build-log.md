@@ -497,3 +497,19 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
   an operator gate because Terraform is not installed locally.
 - No live issuer, JWKS, credential, cloud, Drive, Work, Codex, or external network call ran.
 - Status: repaired; fresh operational feature acceptance rerun pending.
+
+## 2026-08-29 — 07-production-write-and-tree-support / 002-deployment-owned-write-authority
+
+- Implementation: `gpt-5.6-terra`, high reasoning. Replaced the single-use evidence/JWS/replay/
+  expiring-lease runtime authority with strict default-off deployment configuration while retaining
+  live evidence as an operator release gate.
+- Write-enabled composition selects the server-only Drive write scope and constructs an authenticated
+  raw writer; disabled composition never constructs either. JSON/MCP sessions remain withheld until
+  task 003 connects mutation behavior. Invalid writer factories now fail before listener startup.
+- Terraform requires both explicit write enablement and a separate risk acknowledgement, defaults to
+  read-only, and now projects every required tree-budget field in both Google auth branches.
+- Validation: full combined `CI=true pnpm check` passed with 251 tests. Fresh task review found one
+  startup-validation gap; it was repaired and the exact delta review returned no findings.
+- Terraform formatting/validation remains an operator gate because Terraform is not installed.
+- No live credential, Drive, cloud, Work, Codex, Terraform apply, or external network call ran.
+- Status: complete.

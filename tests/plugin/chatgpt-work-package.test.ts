@@ -57,7 +57,7 @@ describe("ChatGPT Work private package", () => {
       /Before\s+`archive_markdown`, request explicit user confirmation/u,
     );
     expect(readme).toMatch(
-      /never issue a\s+write lease or bypass the write gate/u,
+      /never issue\s+a\s+deployment write authority or bypass its default-disabled boundary/u,
     );
     expect(instructions + checklist + readme).toMatch(
       /`create_markdown`, `update_markdown`, and `archive_markdown`[\s\S]{0,180}`UNSUPPORTED`/u,

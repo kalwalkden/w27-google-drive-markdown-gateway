@@ -142,6 +142,10 @@ const driveSchema = z
 const serviceConfigSchema = z
   .object({
     drive: driveSchema,
+    write: z
+      .object({ enabled: z.boolean() })
+      .strict()
+      .default({ enabled: false }),
     http: httpSchema,
     authentication: z
       .object({
@@ -243,6 +247,7 @@ export type ServiceConfig = Readonly<{
         readonly maxContentSearchFiles: number;
         readonly maxResults: number;
       }>;
+  readonly write: Readonly<{ readonly enabled: boolean }>;
   readonly authentication: Readonly<{
     readonly workMcp: Readonly<{
       readonly issuer: string;

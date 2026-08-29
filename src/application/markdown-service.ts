@@ -44,7 +44,6 @@ import {
   guardedUpdateFile,
   isGuardedDriveWriter,
 } from "../drive/guarded-drive-write-port.js";
-import type { WriteLease } from "../write-gate/gate.js";
 
 const DEFAULT_MAX_BYTES = 1_000_000;
 const DEFAULT_SEARCH_LIMIT = 20;
@@ -163,14 +162,14 @@ export class MarkdownService {
     }
   }
 
-  openWriteSession(lease: WriteLease): MarkdownWriteSession {
+  openWriteSession(): MarkdownWriteSession {
     return Object.freeze({
       createMarkdown: (input: CreateMarkdownInput) =>
-        this.createMarkdown(input, lease),
+        this.createMarkdown(input),
       updateMarkdown: (input: UpdateMarkdownInput) =>
-        this.updateMarkdown(input, lease),
+        this.updateMarkdown(input),
       archiveMarkdown: (input: ArchiveMarkdownInput) =>
-        this.archiveMarkdown(input, lease),
+        this.archiveMarkdown(input),
     });
   }
 
@@ -341,7 +340,6 @@ export class MarkdownService {
 
   private async createMarkdown(
     input: CreateMarkdownInput,
-    lease: WriteLease,
   ): Promise<CreateMarkdownResult> {
     const segments = requireMarkdownPath(input.path);
     requireContentWithinLimit(input.content, this.maxMarkdownBytes);
@@ -361,7 +359,6 @@ export class MarkdownService {
     }
     const result = await guardedCreateFile(
       this.writer,
-      lease,
       parent.node.id as FolderId,
       leaf,
       input.content,
@@ -385,7 +382,6 @@ export class MarkdownService {
 
   private async updateMarkdown(
     input: UpdateMarkdownInput,
-    lease: WriteLease,
   ): Promise<UpdateMarkdownResult> {
     this.requireExpectedRevision(input.expectedRevision);
     requireContentWithinLimit(input.content, this.maxMarkdownBytes);
@@ -393,7 +389,6 @@ export class MarkdownService {
     this.assertClosedMutationTopology(resolved);
     const result = await guardedUpdateFile(
       this.writer,
-      lease,
       resolved.node.id as FileId,
       input.expectedRevision,
       input.content,
@@ -403,12 +398,10 @@ export class MarkdownService {
 
   private async archiveMarkdown(
     input: ArchiveMarkdownInput,
-    lease: WriteLease,
   ): Promise<ArchiveMarkdownResult> {
     if ("fileId" in input) this.assertWellFormedCallerId(input.fileId);
     this.requireExpectedRevision(input.expectedRevision);
     void input;
-    void lease;
     // A file ETag cannot bind the archive folder's parent chain.
     throw new MarkdownGatewayError(
       "UNSUPPORTED",

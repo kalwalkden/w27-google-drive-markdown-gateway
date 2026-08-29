@@ -10,6 +10,9 @@ locals {
     maxMarkdownBytes  = var.max_markdown_bytes
     maxTraversalNodes = var.max_traversal_nodes
     maxPages          = var.max_pages
+    maxPathDepth      = var.max_path_depth
+    maxMetadataChecks = var.max_metadata_checks
+    maxContentSearchFiles = var.max_content_search_files
     maxResults        = var.max_results
     } : {
     authMode          = "my-drive-refresh-token"
@@ -19,11 +22,17 @@ locals {
     maxMarkdownBytes  = var.max_markdown_bytes
     maxTraversalNodes = var.max_traversal_nodes
     maxPages          = var.max_pages
+    maxPathDepth      = var.max_path_depth
+    maxMetadataChecks = var.max_metadata_checks
+    maxContentSearchFiles = var.max_content_search_files
     maxResults        = var.max_results
   }
 
   service_config = {
     drive = local.drive_config
+    write = {
+      enabled = var.enable_write
+    }
     authentication = {
       workMcp = {
         issuer                 = var.work_mcp_issuer
@@ -170,6 +179,10 @@ resource "google_cloud_run_v2_service" "gateway" {
       error_message = "Set acknowledge_public_invoker=true only after approving public Cloud Run invocation."
     }
     precondition {
+      condition     = !var.enable_write || var.acknowledge_write_risk
+      error_message = "A write-enabled revision requires reviewed enable_write and acknowledge_write_risk settings."
+    }
+    precondition {
       condition     = var.work_mcp_issuer != var.work_mcp_jwks_url
       error_message = "work_mcp_issuer and work_mcp_jwks_url must differ."
     }
@@ -184,6 +197,10 @@ resource "google_cloud_run_v2_service" "gateway" {
     precondition {
       condition     = var.max_result_items <= var.max_results
       error_message = "max_result_items must not exceed max_results."
+    }
+    precondition {
+      condition     = var.max_content_search_files <= var.max_traversal_nodes
+      error_message = "max_content_search_files must not exceed max_traversal_nodes."
     }
     precondition {
       condition     = var.drive_auth_mode != "shared-drive-adc" || (var.oauth_secret_id == null || trimspace(var.oauth_secret_id) == "")

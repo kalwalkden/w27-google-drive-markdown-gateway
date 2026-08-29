@@ -12,9 +12,19 @@ work_mcp_audience        = "replace-with-audience"
 work_mcp_jwks_url        = "https://keys.example.invalid/jwks"
 work_mcp_max_token_lifetime_seconds = 3600
 
+# Bounded tree-read defaults; keep content searching within traversal bounds.
+max_path_depth           = 100
+max_metadata_checks      = 100000
+max_content_search_files = 1000
+
 # Required only for a reviewed full plan/apply that creates or changes Cloud Run.
 # Keep false for the reviewed Artifact Registry bootstrap apply.
 acknowledge_production_service_apply = false
+
+# Runtime writes are disabled by default. Enabling requires a separate reviewed
+# acknowledgement and does not replace the dedicated-root release evidence.
+enable_write             = false
+acknowledge_write_risk   = false
 
 # Public invocation is separately disabled and requires its own acknowledgement.
 allow_public_invoker       = false

@@ -32,7 +32,7 @@ Reject endpoints with credentials, query strings, or fragments.
    Codex credentials, gateway secret references, and raw transcripts.
 5. Confirm gateway writes remain independently fail closed. Installation,
    private-plugin metadata, user consent, and validation evidence never issue a
-   write lease or bypass the write gate.
+   deployment write authority or bypass its default-disabled boundary.
 
 The current production composition deliberately supplies no write session.
 `create_markdown`, `update_markdown`, and `archive_markdown` therefore each
@@ -52,4 +52,4 @@ gateway is deployed and a private Work session is available. It is deliberately
 manual and must not be run by tests, builds, setup scripts, or an agent. Record
 only sanitised evidence using
 [release-evidence.template.json](release-evidence.template.json). That record
-is release evidence, never a `WriteGateDecision` input.
+is release evidence, never a runtime-authority input.

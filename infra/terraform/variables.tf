@@ -278,6 +278,39 @@ variable "max_pages" {
   }
 }
 
+variable "max_path_depth" {
+  type        = number
+  description = "Maximum verified relative-path depth."
+  default     = 100
+
+  validation {
+    condition     = var.max_path_depth >= 1 && var.max_path_depth <= 100 && floor(var.max_path_depth) == var.max_path_depth
+    error_message = "max_path_depth must be an integer from 1 to 100."
+  }
+}
+
+variable "max_metadata_checks" {
+  type        = number
+  description = "Maximum Drive metadata checks per request."
+  default     = 100000
+
+  validation {
+    condition     = var.max_metadata_checks >= 1 && var.max_metadata_checks <= 100000 && floor(var.max_metadata_checks) == var.max_metadata_checks
+    error_message = "max_metadata_checks must be an integer from 1 to 100000."
+  }
+}
+
+variable "max_content_search_files" {
+  type        = number
+  description = "Maximum file bodies read during one content search."
+  default     = 1000
+
+  validation {
+    condition     = var.max_content_search_files >= 1 && var.max_content_search_files <= 10000 && floor(var.max_content_search_files) == var.max_content_search_files
+    error_message = "max_content_search_files must be an integer from 1 to 10000."
+  }
+}
+
 variable "max_results" {
   type        = number
   description = "Maximum Drive result count."
@@ -480,5 +513,17 @@ variable "acknowledge_public_invoker" {
 variable "acknowledge_production_service_apply" {
   type        = bool
   description = "Explicit operator acknowledgement required before creating or changing the production Cloud Run service."
+  default     = false
+}
+
+variable "enable_write" {
+  type        = bool
+  description = "Enables server-side Drive writer composition for a reviewed revision; default is read-only."
+  default     = false
+}
+
+variable "acknowledge_write_risk" {
+  type        = bool
+  description = "Separate acknowledgement required with enable_write for a reviewed write-enabled revision."
   default     = false
 }

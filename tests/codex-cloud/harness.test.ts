@@ -322,7 +322,7 @@ describe("Codex cloud harness", () => {
     ["create-unauthenticated", "failed", "UNAUTHENTICATED", "failed"],
     ["create-unsupported", "inconclusive", "UNSUPPORTED", "inconclusive"],
   ] as const)(
-    "keeps auth and write-gate failures closed: %s",
+    "keeps auth and write-authority failures closed: %s",
     async (mode, outcome, code, overall) => {
       const fake = fakeRunner(mode);
       const result = await runHarness(

@@ -9,6 +9,15 @@ import {
   type GoogleDriveReadAdapterConfig,
 } from "../drive/google-drive-read-adapter.js";
 import {
+  createGoogleDriveAuthenticatedRawHttp,
+  type GoogleDriveAuthConfig,
+} from "../drive/google-drive-auth.js";
+import { GuardedDriveWritePort } from "../drive/guarded-drive-write-port.js";
+import {
+  GoogleDriveWriteAdapter,
+  type GoogleDriveRawHttp,
+} from "../drive/google-drive-write-adapter.js";
+import {
   createJsonApiApp,
   type JsonApiDependencies,
 } from "../http/json-api.js";
@@ -42,6 +51,12 @@ export interface RuntimeDependencies {
   readonly createReadAdapter?: (
     config: GoogleDriveReadAdapterConfig,
   ) => ConstructorParameters<typeof MarkdownService>[0];
+  readonly createWriteRawHttp?: (
+    config: GoogleDriveAuthConfig,
+  ) => GoogleDriveRawHttp;
+  readonly createWriteAdapter?: (
+    http: GoogleDriveRawHttp,
+  ) => ConstructorParameters<typeof GuardedDriveWritePort>[0];
   readonly createVerifier?: (config: ServiceConfig) => PrincipalVerifier;
   readonly createApiApp?: (dependencies: JsonApiDependencies) => Express;
   readonly metricRecorder?: MetricRecorder;
@@ -98,6 +113,17 @@ function readAdapterConfig(
   };
 }
 
+function driveAuthConfig(
+  config: ServiceConfig,
+  credentials?: Awaited<ReturnType<typeof loadOAuthCredentials>>,
+): GoogleDriveAuthConfig {
+  if (config.drive.authMode === "shared-drive-adc") {
+    return { mode: "shared-drive-adc" };
+  }
+  if (!credentials) throw new RuntimeConfigurationError();
+  return { mode: "my-drive-refresh-token", credentials };
+}
+
 /**
  * Creates the JSON and Work MCP APIs only after bounded configuration parsing.
  * It leaves write sessions absent, so both transports retain default-disabled
@@ -120,18 +146,35 @@ export async function composeRuntime(
   const adapter = (
     dependencies.createReadAdapter ?? createGoogleDriveReadAdapter
   )(readAdapterConfig(config, credentials));
-  const service = new MarkdownService(adapter, {
-    rootFolderId: config.drive.rootFolderId,
-    archiveFolderId: config.drive.archiveFolderId,
-    maxMarkdownBytes: config.drive.maxMarkdownBytes,
-    defaultSearchLimit: Math.min(20, config.http.maxResultItems),
-    maxSearchLimit: config.http.maxResultItems,
-    maxListResults: config.http.maxResultItems,
-    maxPathDepth: config.drive.maxPathDepth,
-    maxTraversalNodes: config.drive.maxTraversalNodes,
-    maxContentSearchFiles: config.drive.maxContentSearchFiles,
-    maxJsonResponseBytes: config.http.maxJsonResponseBytes,
-  });
+  const writer = config.write.enabled
+    ? new GuardedDriveWritePort(
+        (
+          dependencies.createWriteAdapter ??
+          ((http) => new GoogleDriveWriteAdapter(http))
+        )(
+          (
+            dependencies.createWriteRawHttp ??
+            createGoogleDriveAuthenticatedRawHttp
+          )(driveAuthConfig(config, credentials)),
+        ),
+      )
+    : undefined;
+  const service = new MarkdownService(
+    adapter,
+    {
+      rootFolderId: config.drive.rootFolderId,
+      archiveFolderId: config.drive.archiveFolderId,
+      maxMarkdownBytes: config.drive.maxMarkdownBytes,
+      defaultSearchLimit: Math.min(20, config.http.maxResultItems),
+      maxSearchLimit: config.http.maxResultItems,
+      maxListResults: config.http.maxResultItems,
+      maxPathDepth: config.drive.maxPathDepth,
+      maxTraversalNodes: config.drive.maxTraversalNodes,
+      maxContentSearchFiles: config.drive.maxContentSearchFiles,
+      maxJsonResponseBytes: config.http.maxJsonResponseBytes,
+    },
+    writer,
+  );
   const principalVerifier = (
     dependencies.createVerifier ?? createPrincipalVerifier
   )(config);

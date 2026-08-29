@@ -10,8 +10,8 @@ commands, logs, tickets, chat, or repository files. Routine audit and telemetry 
 the [observability contract](./observability-contract.md). An exercise or incident record is a
 separate, access-controlled, sanitized operator artifact; use the checked-in
 [`operations-exercise-record.example.json`](./operations-exercise-record.example.json) only as a
-schema-shaped template. It is not live evidence, a credential inventory, write-gate approval, or a
-gateway write lease.
+schema-shaped template. It is not live evidence, a credential inventory, deployment acknowledgement,
+or gateway write authority.
 
 No procedure here enables a write session, nested mutation, archive route, Drive delete, or Drive
 trash operation. The current read surface is bounded and root-confined, including nested and
@@ -149,8 +149,8 @@ or sink failure is an observability incident, not evidence that the gateway or D
    the Drive administrator.
 4. Validate process composition with `/healthz` and protected-route denial separately. A healthy
    process does not prove Drive recovery.
-5. Record a sanitized external outcome and follow-up. It does not authorize a write lease or prove
-   write-gate safety.
+5. Record a sanitized external outcome and follow-up. It does not authorize runtime writes or prove
+   deployment write-authority safety.
 
 ## Drive version-history recovery
 

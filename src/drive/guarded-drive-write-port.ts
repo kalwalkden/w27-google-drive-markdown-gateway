@@ -1,8 +1,3 @@
-import {
-  type WriteGate,
-  type WriteLease,
-  validateWriteLease,
-} from "../write-gate/gate.js";
 import type {
   ConditionalWriteResult,
   CreateWriteResult,
@@ -12,7 +7,6 @@ import type { FileId, FolderId, Revision } from "../domain/markdown.js";
 
 interface EnabledWriterState {
   readonly kind: "enabled";
-  readonly gate: WriteGate;
   readonly raw: RawDriveWritePort;
 }
 
@@ -26,24 +20,39 @@ type WriterState = EnabledWriterState | DisabledWriterState;
 // state; only an exact object key can retrieve its module-private state.
 const writerStates = new WeakMap<object, WriterState>();
 
+function isRawDriveWritePort(value: unknown): value is RawDriveWritePort {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<RawDriveWritePort>;
+  return (
+    typeof candidate.createFile === "function" &&
+    typeof candidate.updateFile === "function" &&
+    typeof candidate.moveFile === "function"
+  );
+}
+
 /** A module-authenticated writer capability accepted by MarkdownService. */
 export type GuardedDriveWriter = GuardedDriveWritePort | DisabledDriveWritePort;
 
 /**
- * Revalidates process-local authority at the last synchronous step before a
- * provider mutation. The constructor is final so an alternate state cannot be
- * installed by a subclass.
+ * The constructor is final so an alternate state cannot be installed by a
+ * subclass. Runtime composition only creates this object in write-enabled
+ * deployments, and its raw port remains module-private.
  */
 export class GuardedDriveWritePort {
-  constructor(gate: WriteGate, raw: RawDriveWritePort) {
+  constructor(raw: RawDriveWritePort) {
     if (new.target !== GuardedDriveWritePort) {
       throw new TypeError("GuardedDriveWritePort cannot be subclassed.");
     }
-    writerStates.set(this, { kind: "enabled", gate, raw });
+    if (!isRawDriveWritePort(raw)) {
+      throw new TypeError(
+        "GuardedDriveWritePort requires a raw Drive write port.",
+      );
+    }
+    writerStates.set(this, { kind: "enabled", raw });
   }
 }
 
-/** Safe default until deployment supplies evidence, trust, replay, and approval. */
+/** Safe default for read-only deployments. */
 export class DisabledDriveWritePort {
   constructor() {
     if (new.target !== DisabledDriveWritePort) {
@@ -61,7 +70,6 @@ export function isGuardedDriveWriter(
 
 export function guardedCreateFile(
   writer: GuardedDriveWriter,
-  lease: WriteLease,
   parentId: FolderId,
   name: string,
   content: string,
@@ -70,15 +78,11 @@ export function guardedCreateFile(
   if (!state || state.kind === "disabled") {
     return Promise.resolve({ outcome: "unsupported" });
   }
-  if (!validateWriteLease(state.gate, lease).allowed) {
-    return Promise.resolve({ outcome: "unsupported" });
-  }
   return state.raw.createFile(parentId, name, content);
 }
 
 export function guardedUpdateFile(
   writer: GuardedDriveWriter,
-  lease: WriteLease,
   fileId: FileId,
   expectedRevision: Revision,
   content: string,
@@ -87,15 +91,11 @@ export function guardedUpdateFile(
   if (!state || state.kind === "disabled") {
     return Promise.resolve({ outcome: "unsupported" });
   }
-  if (!validateWriteLease(state.gate, lease).allowed) {
-    return Promise.resolve({ outcome: "unsupported" });
-  }
   return state.raw.updateFile(fileId, expectedRevision, content);
 }
 
 export function guardedMoveFile(
   writer: GuardedDriveWriter,
-  lease: WriteLease,
   fileId: FileId,
   expectedRevision: Revision,
   sourceFolderId: FolderId,
@@ -103,9 +103,6 @@ export function guardedMoveFile(
 ): Promise<ConditionalWriteResult> {
   const state = writerStates.get(writer);
   if (!state || state.kind === "disabled") {
-    return Promise.resolve({ outcome: "unsupported" });
-  }
-  if (!validateWriteLease(state.gate, lease).allowed) {
     return Promise.resolve({ outcome: "unsupported" });
   }
   return state.raw.moveFile(

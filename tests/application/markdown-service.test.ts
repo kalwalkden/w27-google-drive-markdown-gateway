@@ -21,42 +21,9 @@ import type {
 import { DriveReadLimitError } from "../../src/drive/drive-port.js";
 import { GuardedDriveWritePort } from "../../src/drive/guarded-drive-write-port.js";
 import { InMemoryDrivePort } from "../../src/drive/in-memory-drive-port.js";
-import { WriteGate } from "../../src/write-gate/gate.js";
-import { InMemoryConsumedApprovalStore } from "../../src/write-gate/replay-store.js";
-import {
-  compactHeader,
-  evidenceBytes,
-  validApproval,
-  validEvidence,
-  validTrust,
-} from "../write-gate/fixtures.js";
-
-async function issueTestCapability() {
-  const evidence = validEvidence();
-  const bytes = evidenceBytes(evidence);
-  const gate = new WriteGate({
-    trust: validTrust(),
-    replayStore: new InMemoryConsumedApprovalStore(() =>
-      Date.parse("2026-01-01T00:03:00.000Z"),
-    ),
-    clock: { now: () => new Date("2026-01-01T00:03:00.000Z") },
-    verifier: { verify: async () => validApproval(bytes) },
-    randomBytes: () => new Uint8Array(32).fill(7),
-  });
-  const decision = await gate.evaluate({
-    evidence,
-    evidenceBytes: bytes,
-    approvalJws: compactHeader(),
-  });
-  if (!decision.allowed) throw new Error("test lease was denied");
-  return { gate, lease: decision.lease };
-}
-
-const testCapability = await issueTestCapability();
-const testLease = testCapability.lease;
 
 function writerFrom(raw: RawDriveWritePort): GuardedDriveWritePort {
-  return new GuardedDriveWritePort(testCapability.gate, raw);
+  return new GuardedDriveWritePort(raw);
 }
 
 function fixture() {
@@ -112,7 +79,7 @@ function fixture() {
     },
     writerFrom(drive),
   );
-  return { drive, service, session: service.openWriteSession(testLease) };
+  return { drive, service, session: service.openWriteSession() };
 }
 
 function expectCode(action: () => Promise<unknown>, code: string) {
@@ -206,7 +173,7 @@ describe("MarkdownService", () => {
     await expectCode(
       () =>
         service
-          .openWriteSession(testLease)
+          .openWriteSession()
           .createMarkdown({ path: "new.md", content: "x" }),
       "UNSUPPORTED",
     );
@@ -485,13 +452,13 @@ describe("MarkdownService", () => {
     await expectCode(
       () =>
         service
-          .openWriteSession(testLease)
+          .openWriteSession()
           .createMarkdown({ path: "docs/new.md", content: "x" }),
       "UNSUPPORTED",
     );
     await expectCode(
       () =>
-        service.openWriteSession(testLease).updateMarkdown({
+        service.openWriteSession().updateMarkdown({
           path: "docs/guide.md",
           expectedRevision: revision("1"),
           content: "x",
@@ -514,7 +481,7 @@ describe("MarkdownService", () => {
       archiveFolderId: folderId("archive"),
       maxMarkdownBytes: 32,
     });
-    const session = service.openWriteSession(testLease);
+    const session = service.openWriteSession();
     await expectCode(
       () => session.createMarkdown({ path: "../outside.md", content: "x" }),
       "INVALID_PATH",
@@ -620,7 +587,7 @@ describe("MarkdownService", () => {
       drive,
       { rootFolderId: folderId("root"), archiveFolderId: folderId("cycle-a") },
       writerFrom(drive),
-    ).openWriteSession(testLease);
+    ).openWriteSession();
     await expectCode(
       () =>
         invalidArchive.archiveMarkdown({
@@ -714,7 +681,7 @@ describe("MarkdownService", () => {
       drive,
       { rootFolderId: folderId("root"), archiveFolderId: folderId("archive") },
       writerFrom(drive),
-    ).openWriteSession(testLease);
+    ).openWriteSession();
     await expectCode(
       () =>
         session.updateMarkdown({
@@ -1026,7 +993,7 @@ describe("MarkdownService", () => {
         updateFile: drive.updateFile.bind(drive),
         moveFile: drive.moveFile.bind(drive),
       }),
-    ).openWriteSession(testLease);
+    ).openWriteSession();
     await expectCode(
       () => createService.createMarkdown({ path: "new.md", content: "new" }),
       "UNSUPPORTED",
@@ -1047,7 +1014,7 @@ describe("MarkdownService", () => {
         }),
         moveFile: drive.moveFile.bind(drive),
       }),
-    ).openWriteSession(testLease);
+    ).openWriteSession();
     await expectCode(
       () =>
         updateService.updateMarkdown({
@@ -1074,7 +1041,7 @@ describe("MarkdownService", () => {
           },
         }),
       }),
-    ).openWriteSession(testLease);
+    ).openWriteSession();
     await expectCode(
       () =>
         archiveResponseService.archiveMarkdown({
@@ -1095,7 +1062,7 @@ describe("MarkdownService", () => {
       drive,
       { rootFolderId: folderId("root"), archiveFolderId: folderId("archive") },
       writerFrom(drive),
-    ).openWriteSession(testLease);
+    ).openWriteSession();
     await expectCode(
       () =>
         archiveService.archiveMarkdown({
