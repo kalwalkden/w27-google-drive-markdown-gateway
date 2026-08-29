@@ -2,107 +2,56 @@
 
 ## Primary edit targets
 
-| Path | Symbol / area | Why it is likely to change |
+| Path | Area | Why it is likely to change |
 | --- | --- | --- |
-| `docs/planning-file-source-of-truth.md` (new) | Git/Drive ownership policy and flat taxonomy | Makes the Epic 6 source-of-truth decision durable without treating the product handoff as an executable plan. |
-| `config/planning-file-migration.manifest.json` (new) | reviewed v1 initial migration allowlist | Names the only approved initial source/target pair and its exact source digest. |
-| `src/planning-migration/manifest.ts` (new) | closed v1 parser/normalizer | Keeps schema, taxonomy, unique-name, and no-unknown-field enforcement independent of a live client. |
-| `src/planning-migration/repository.ts` (new) | bounded source/root facts and SHA-256 seam | Prevents source traversal/symlink escape and supports testable digest verification. |
-| `src/planning-migration/plan.ts` (new) | deterministic, content-free plan construction | Converts a valid manifest plus checked sources into review material only. |
-| `src/planning-migration/cli.ts` (new) | direct ESM plan executable | Provides one explicit opt-in command without a copy or live-cutover action. |
-| `package.json` | narrow `migration:plan` script | Exposes the compiled review-only command after checking concurrent package edits. |
-| `tests/planning-migration/` (new) | manifest, source-boundary, output, and static-policy tests | Proves fail-closed planning behavior using local fakes/files only. |
+| `docs/planning-file-source-of-truth.md` (new) | Git/Drive authority and bounded nested taxonomy | Establishes durable policy without claiming live cutover. |
+| `config/planning-file-migration.manifest.json` (new) | reviewed one-entry allowlist | Carries the exact handoff digest and target path. |
+| `src/planning-migration/manifest.ts` (new) | strict manifest parser | Owns closed schema, nested path, and collision rules. |
+| `src/planning-migration/repository.ts` (new) | source containment/hash reader | Enforces repository-relative regular files and digest verification. |
+| `src/planning-migration/plan.ts`, `cli.ts` (new) | deterministic plan and ESM entry | Provides review-only output with no live client path. |
+| `tests/planning-migration/` (new) | local fake/static coverage | Verifies boundaries without Drive, network, or credentials. |
 
 ## Entry point and call path
 
 ```text
-explicit migration:plan invocation
-  -> manifest path / closed v1 parser
-  -> discovered repository root + lstat/realpath source containment
-  -> bounded raw-byte SHA-256 verification
+explicit migration:plan + checked-in manifest
+  -> closed parser + normalized target path
+  -> bounded, no-symlink source/hash validation
   -> deterministic review JSON
-
-plan tool -/-> Drive API, md-drive, HTTP/MCP, auth, secret file, write gate, filesystem mutation
 ```
+
+There is no path from the planner to `src/drive/**`, JSON/MCP transports, `md-drive`, authentication, a write session, archive dispatch, or deployment.
 
 ## Contracts, state, and invariants
 
-- `w27-planning-file-migration-manifest-v1` has one direct-root-flat topology and a closed entries
-  array. Unknown keys, duplicate keys, case-folded duplicate targets, and unsupported archive entries
-  are invalid.
-- An entry carries only reviewed source metadata: stable key, class (`brief`, `specification`, or
-  `draft`), repository-relative regular-file source, direct-root Markdown target leaf, raw-byte
-  SHA-256, `collisionPolicy: "fail"`, and `sourceDisposition`.
-- The prefix mapping is exact: `brief` -> `brief--`, `specification` -> `spec--`, `draft`
-  -> `draft--`. `archive--` has no active manifest class while `archive_markdown` is unavailable.
-- An active entry is not permission. A later operator must separately prove destination conditions,
-  a deployed client, an authorized cutover, and independently gated write capability.
-- Plan output has no source bytes. Repository source/target names and source digest are intentional
-  checked-in review data; it never contains Drive IDs, revisions, endpoint values, credentials,
-  token values, response bodies, or live evidence.
+- The manifest is the sole migration allowlist. Its `targetPath` is a bounded Markdown relative path below the configured root, with a category first segment of `briefs`, `specs`, or `drafts` and a Markdown leaf.
+- The exact source digest is an approval boundary. Manifest validation cannot replace destination collision checks, a write-enabled deployment, or live client/operator evidence.
+- `write.enabled` defaults false and runtime writer composition is deployment-owned. A future controlled revision may enable all three writes, including archive; this planning tool has no mode to do so.
+- Archive moves one verified file to the configured archive folder. The manifest never chooses its archive path; permanent delete and trash stay prohibited.
+- Planner output is not external release evidence. It may be reviewable intent, but must not expose credentials, endpoints, Drive IDs, revisions, bodies, or raw diagnostics.
 
 ## Patterns to reuse
 
-| Existing path | Pattern | Applicability |
-| --- | --- | --- |
-| `src/live-drive/config.ts` | repository-root discovery, external-path/symlink safety posture | Reuse the fail-closed filesystem design only; do not import OAuth, probe configuration, or Drive IDs. |
-| `src/domain/markdown.ts` | Markdown-name, Unicode, and byte-bound helpers | Reuse validation semantics for a direct-root target leaf, without expanding `MarkdownService` behavior. |
-| `src/live-drive/cli.ts` | testable ESM `main` plus direct-execution guard | Reuse executable shape and fixed redacted diagnostics, not its auth/HTTP/Drive calls. |
-| `src/live-drive/evidence.ts` | strict schema/forbidden-key testing mindset | Apply closed-input and no-content-output discipline; this manifest is not live evidence. |
-| `docs/write-gate-and-client-validation.md` | evidence is not write authority | State the same separation for a migration plan and later cutover evidence. |
-| task 04 CLI/task 05 operations specs | one-request/no-secret/operator-only boundaries | Treat them as dependency contracts, not currently available executables. |
+| Path | Pattern |
+| --- | --- |
+| `src/domain/markdown.ts` | UTF-16, Markdown-path, and bounded-path semantics. |
+| `src/application/markdown-service.ts` | Nested resolution and verified archive behavior; reuse as contract, not dependency. |
+| `src/live-drive/config.ts` | Fail-closed repository/output and symlink posture only. |
+| `src/codex-cli/cli.ts`, `src/mcp/stateless-mcp.ts` | Stable six-operation and `OUTCOME_UNKNOWN` recovery contract; do not invoke either. |
+| `docs/write-gate-and-client-validation.md` | Deployment-owned write authority and external evidence separation. |
 
 ## Tests and fixtures
 
-- Temporary repository fixture with a regular Markdown source and injected clock/filesystem/hash
-  seams; no fixture contains a credential, Drive ID, endpoint, or document body beyond inert test
-  text.
-- Valid one-entry output plus all parser rejections: unknown field/version/topology, duplicate
-  key/target, malformed key/digest, incorrect prefix, unsupported archive, non-Markdown/leaf/nested
-  target, bad source disposition/collision policy.
-- Source safety: absolute, traversal, prohibited Git-owned root, missing, non-regular, symlinked
-  file/component, repository escape, stale/changed bytes, byte-bound failure, and malformed Unicode.
-- Output: deterministic ordering, exactly one JSON result on success, fixed redacted diagnostics on
-  failure, no source-content sentinel, and zero client/child/mutation calls.
-- Static assertions read policy/manifest to verify the handoff digest, flat names, Git-owned
-  exclusions, no sync/overwrite/delete/trash, archive deferral, and explicit external cutover gate.
+Use temporary local repositories/files and injected file/hash seams. Cover valid nested paths, depth/byte limits, unknown fields, duplicate normalized and case-folded targets, traversal, absolute/prohibited/symlinked source paths, bad/mismatched digest, races, deterministic output, and proof of zero transport/child/mutation calls. Static tests preserve no-sync, no-overwrite/no-delete/no-trash, default-off write authority, and archive-only cleanup boundaries.
 
 ## Expected unchanged boundaries
 
-- `src/application/**`, `src/domain/**` (except importing existing helpers if final module layout
-  makes that safe), `src/drive/**`, `src/http/**`, `src/mcp/**`, `src/auth/**`,
-  `src/write-gate/**`, `src/runtime/**`, and `src/live-drive/**` keep their product semantics.
-- No JSON/MCP route, diagnostics CLI route, deployment/IAM/secret configuration, Drive folder,
-  client network policy, write session, archive behavior, or real evidence changes.
-- `AGENTS.md`, task/feature status artifacts, handoff, build log, and current concurrent changes
-  are outside scope.
+`src/application/**`, `src/domain/**`, `src/drive/**`, `src/http/**`, `src/mcp/**`, `src/auth/**`, `src/write-gate/**`, `src/runtime/**`, client packages, Terraform, live probes, `AGENTS.md`, feature status, task list, and build log remain outside this task.
 
 ## Validation commands
 
-Authoritative sources: `AGENTS.md`, `ARCHITECTURE.md`, and `package.json`.
-
-```bash
-CI=true pnpm test -- tests/planning-migration
-CI=true pnpm lint
-CI=true pnpm format:check
-CI=true pnpm typecheck
-CI=true pnpm test
-CI=true pnpm build
-./scripts/verify-vendored-skills.sh
-CI=true pnpm check
-git diff --check
-```
-
-## Selected external material
-
-None. The handoff, approved Epic 6 artifacts, current implementation, and checked-in client and
-operations planning artifacts are binding. Live platform/Drive behavior is operator-time only.
+Use `CI=true pnpm test -- tests/planning-migration`, then the canonical lint, format, typecheck, test, build, vendored-skill, `pnpm check`, and `git diff --check` commands from `AGENTS.md` and `package.json`. Do not run a live cutover or any network/client/credential command.
 
 ## Uncertainties to verify
 
-- Re-read `package.json` and `src/live-drive/config.ts` before implementation because concurrent
-  work currently changes package/source files.
-- Confirm the source handoff SHA-256 at implementation time. A mismatch intentionally fails until a
-  reviewer updates the manifest.
-- Recheck whether task 04's CLI is committed before linking to its exact script/output format; this
-  task must not assume it exists.
+Before implementation, recheck the final task-001 manifest interface and current service path-depth/result bounds. The configured root, archive folder, deployment enablement, and operator evidence remain external inputs.
