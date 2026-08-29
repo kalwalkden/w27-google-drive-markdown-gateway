@@ -2,7 +2,7 @@
 
 ## Status
 
-Approved
+Complete
 
 ## Requirements
 
@@ -27,4 +27,3 @@ The MCP adapter will sit beside the HTTP service added by `02-authenticated-serv
 ## Open Questions
 
 None.
-
