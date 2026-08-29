@@ -230,6 +230,42 @@ describe("planning cutover evidence reducer", () => {
         "2026-01-01T00:00:00.000Z",
       ),
     ).toThrow("recovery");
+    expect(() =>
+      evaluateCutoverPreflight(
+        {
+          ...progressed,
+          operations: {
+            ...progressed.operations,
+            archive: {
+              status: "FAILED",
+              reason: "ARCHIVE_VERIFICATION_FAILED",
+            },
+          },
+          archiveVerification: notStarted,
+          manualRecovery: notStarted,
+        },
+        plan,
+        "2026-01-01T00:00:00.000Z",
+      ),
+    ).toThrow("recovery");
+    expect(() =>
+      evaluateCutoverPreflight(
+        {
+          ...progressed,
+          operations: {
+            ...progressed.operations,
+            archive: {
+              status: "INCONCLUSIVE",
+              reason: "MANUAL_RECOVERY_REQUIRED",
+            },
+          },
+          archiveVerification: notStarted,
+          manualRecovery: notStarted,
+        },
+        plan,
+        "2026-01-01T00:00:00.000Z",
+      ),
+    ).toThrow("recovery");
   });
 
   it("requires recovery after uncertain conflict and verification proofs", async () => {

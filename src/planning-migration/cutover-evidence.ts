@@ -246,9 +246,14 @@ function assertRecovery(config: CutoverPreflightConfig): void {
       entry.reason === "OUTCOME_UNKNOWN" ||
       entry.reason === "TRANSPORT_UNCERTAIN",
   );
-  const archiveFailure = [config.archiveVerification, config.cleanup].some(
+  const archiveFailure = [
+    config.operations.archive,
+    config.archiveVerification,
+    config.cleanup,
+  ].some(
     (entry) =>
       entry.status === "FAILED" ||
+      entry.status === "INCONCLUSIVE" ||
       entry.reason === "ARCHIVE_VERIFICATION_FAILED",
   );
   if (firstUncertain < 0 && !archiveFailure) return;
