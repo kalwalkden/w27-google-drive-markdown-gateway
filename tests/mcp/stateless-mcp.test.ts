@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { describe, expect, it } from "vitest";
 
 import type { MarkdownWriteSession } from "../../src/application/markdown-service.js";
@@ -213,15 +214,42 @@ describe("stateless MCP adapter", () => {
       ]);
       expect(listed.tools[4]?.description).toContain("CONFLICT");
       expect(listed.tools[5]?.description).toContain("never deletes");
-      expect(listed.tools[0]?.outputSchema).toMatchObject({
+      const listOutputSchema = listed.tools[0]?.outputSchema;
+      expect(listOutputSchema).toMatchObject({
         type: "object",
         additionalProperties: false,
-        properties: {
-          ok: {
-            anyOf: [{ const: true }, { const: false }],
+        oneOf: [
+          { required: ["ok", "data"], properties: { ok: { const: true } } },
+          {
+            required: ["ok", "error"],
+            properties: { ok: { const: false } },
           },
-        },
+        ],
       });
+      if (!listOutputSchema) throw new Error("missing list output schema");
+      const validate = new AjvJsonSchemaValidator().getValidator(
+        listOutputSchema,
+      );
+      expect(validate({ ok: true, data: { items: [metadata] } }).valid).toBe(
+        true,
+      );
+      expect(
+        validate({
+          ok: false,
+          error: { code: "INTERNAL", message: "Internal server error." },
+        }).valid,
+      ).toBe(true);
+      expect(validate({ ok: true }).valid).toBe(false);
+      expect(
+        validate({
+          ok: true,
+          data: { items: [metadata] },
+          error: { code: "INTERNAL", message: "Internal server error." },
+        }).valid,
+      ).toBe(false);
+      expect(validate({ ok: false, data: { items: [metadata] } }).valid).toBe(
+        false,
+      );
 
       expect(
         structured(
@@ -482,6 +510,41 @@ describe("stateless MCP adapter", () => {
         ok: false,
         error: { code: "UNSUPPORTED", message: "Operation is unavailable." },
       });
+      await client.close();
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("maps domain result limits to the stable public tool error", async () => {
+    const fixture = await start({
+      service: {
+        async listMarkdown() {
+          return [];
+        },
+        async searchMarkdown() {
+          return [];
+        },
+        async readMarkdown() {
+          throw new MarkdownGatewayError("RESULT_LIMIT", "SENTINEL-RESULT");
+        },
+      },
+    });
+    try {
+      const client = await fixture.connect();
+      const result = await client.callTool({
+        name: "read_markdown",
+        arguments: { fileId: "guide-file" },
+      });
+      expect(structured(result)).toEqual({
+        ok: false,
+        error: {
+          code: "RESULT_LIMIT_EXCEEDED",
+          message: "Result exceeds the configured response limit.",
+        },
+      });
+      expect("content" in result && result.isError).toBe(true);
+      expect(JSON.stringify(result)).not.toContain("SENTINEL-RESULT");
       await client.close();
     } finally {
       await fixture.close();

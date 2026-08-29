@@ -49,6 +49,7 @@ type PublicErrorCode =
   | "INVALID_CONTENT"
   | "INVALID_ARCHIVE"
   | "FILE_TOO_LARGE"
+  | "RESULT_LIMIT_EXCEEDED"
   | "NOT_FOUND"
   | "AMBIGUOUS_PATH"
   | "CONFLICT"
@@ -100,6 +101,7 @@ const publicErrorSchema = z
       "INVALID_CONTENT",
       "INVALID_ARCHIVE",
       "FILE_TOO_LARGE",
+      "RESULT_LIMIT_EXCEEDED",
       "NOT_FOUND",
       "AMBIGUOUS_PATH",
       "CONFLICT",
@@ -112,12 +114,20 @@ const publicErrorSchema = z
   .strict();
 
 /**
- * The SDK requires output schemas to have an object root. The refinement makes
- * the two result variants exclusive while preserving an object-root schema for
- * MCP tool discovery. The SDK skips output validation for `isError`, so handlers
- * still construct that variant directly and tests exercise its structured form.
+ * The SDK requires output schemas to have an object root. Metadata is retained
+ * by the SDK's Zod v4 JSON Schema converter, so this publishes exact `oneOf`
+ * variants while the object root remains discoverable to MCP clients.
  */
-function outputSchema(data: z.ZodType<unknown>) {
+function publishedJsonSchema(schema: z.ZodType): Record<string, unknown> {
+  const { $schema: _dialect, ...published } = z.toJSONSchema(schema);
+  return published;
+}
+
+function outputSchema(data: z.ZodType) {
+  const success = z.object({ ok: z.literal(true), data }).strict();
+  const failure = z
+    .object({ ok: z.literal(false), error: publicErrorSchema })
+    .strict();
   return z
     .object({
       ok: z.union([z.literal(true), z.literal(false)]),
@@ -125,16 +135,8 @@ function outputSchema(data: z.ZodType<unknown>) {
       error: publicErrorSchema.optional(),
     })
     .strict()
-    .superRefine((value, context) => {
-      if (value.ok) {
-        if (value.data === undefined || value.error !== undefined) {
-          context.addIssue({ code: "custom", message: validationMessage });
-        }
-        return;
-      }
-      if (value.data !== undefined || value.error === undefined) {
-        context.addIssue({ code: "custom", message: validationMessage });
-      }
+    .meta({
+      oneOf: [publishedJsonSchema(success), publishedJsonSchema(failure)],
     });
 }
 
@@ -252,6 +254,11 @@ function publicToolError(error: unknown): PublicToolError {
         return {
           code: error.code,
           message: "Markdown content exceeds the configured limit.",
+        };
+      case "RESULT_LIMIT":
+        return {
+          code: "RESULT_LIMIT_EXCEEDED",
+          message: "Result exceeds the configured response limit.",
         };
       case "NOT_FOUND":
       case "OUTSIDE_ROOT":
