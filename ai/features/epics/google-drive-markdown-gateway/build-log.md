@@ -76,4 +76,13 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
   read-time ancestry verification, provider-result consistency, and archive destination safety.
 - Validation: full combined `CI=true pnpm check` passed with 67 tests, plus diff and credential
   scans. All new application tests are fake-only.
-- Status: complete; commit pending
+- Status: complete
+- Commit: `c78696f` (`build root-confined Markdown domain core`)
+
+## 2026-08-29 — 01-drive-core / 002-google-drive-read-adapter specification
+
+- Spec shaping: `gpt-5.6-terra`, high reasoning because authentication modes and root-confined
+  provider queries need a stronger planning pass.
+- Result: approved implementation package for a read-only `googleapis` adapter; exact-parent
+  traversal, fatal UTF-8 decoding, bounded reads, safe failures, and zero-call unsupported writes.
+- Status: specification complete; implementation pending
