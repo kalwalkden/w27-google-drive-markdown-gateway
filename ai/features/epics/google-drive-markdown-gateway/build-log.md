@@ -115,3 +115,12 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - All tests use an injected fake Google API. No token exchange, credential discovery, network call,
   live Drive request, or Drive mutation occurred; production writes remain disabled.
 - Status: complete
+
+## 2026-08-29 — 01-drive-core / 003-guarded-write-and-archive-operations specification
+
+- Spec shaping: `gpt-5.6-terra`, high reasoning because this task joins application policy,
+  process-local write authority, exact raw ETag handling, and conditional Drive mutation semantics.
+- Result: approved implementation package for ephemeral write sessions, last-moment lease
+  validation, exact `If-Match` update/archive requests, stable conflict handling, and default-disabled
+  composition. All validation remains fake-only until an operator supplies external evidence.
+- Status: specification complete; implementation pending
