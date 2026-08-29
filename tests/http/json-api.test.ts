@@ -20,7 +20,10 @@ import {
   createJsonApiApp,
   type JsonApiDependencies,
 } from "../../src/http/json-api.js";
-import type { MarkdownApiAuditEvent } from "../../src/observability/audit.js";
+import type {
+  MarkdownApiAuditEvent,
+  MarkdownMetricObservation,
+} from "../../src/observability/audit.js";
 
 const metadata = {
   relativePath: "docs/guide.md",
@@ -869,5 +872,96 @@ describe("JSON API", () => {
       expect.not.objectContaining({ fileId: expect.anything() }),
     ]);
     expect(JSON.stringify(events)).not.toContain(hostileFileId);
+  });
+
+  it("emits closed Drive-failure metrics without request or provider detail", async () => {
+    const events: MarkdownApiAuditEvent[] = [];
+    const metrics: MarkdownMetricObservation[] = [];
+    const requestPath = "docs/private-plan.md";
+    const response = await call(
+      {
+        auditLogger: { info: (event) => events.push(event) },
+        metricRecorder: { record: (observation) => metrics.push(observation) },
+        service: {
+          ...fakeService(),
+          async readMarkdown() {
+            throw new DriveProviderError("transient", "read-media", 599);
+          },
+        },
+      },
+      `/v1/markdown/read?fileId=${requestPath}`,
+      { headers: authorized },
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      ok: false,
+      operationId: "00000000-0000-4000-8000-000000000001",
+      error: {
+        code: "UPSTREAM_UNAVAILABLE",
+        message: "Service dependency is unavailable.",
+      },
+    });
+    expect(events).toEqual([
+      expect.objectContaining({
+        operation: "read_markdown",
+        result: "upstream_unavailable",
+        dependency: "drive",
+        dependencyFailure: "transient",
+      }),
+    ]);
+    expect(metrics).toEqual([
+      {
+        metric: "gateway_http_in_flight",
+        operation: "read_markdown",
+        value: 1,
+      },
+      {
+        metric: "gateway_http_requests_total",
+        operation: "read_markdown",
+        principalKind: "codex",
+        result: "upstream_unavailable",
+      },
+      {
+        metric: "gateway_http_request_duration_ms",
+        operation: "read_markdown",
+        result: "upstream_unavailable",
+        value: expect.any(Number),
+      },
+      {
+        metric: "gateway_http_in_flight",
+        operation: "read_markdown",
+        value: -1,
+      },
+      {
+        metric: "gateway_dependency_failures_total",
+        operation: "read_markdown",
+        dependency: "drive",
+        failure: "transient",
+      },
+    ]);
+    const serializedMetrics = JSON.stringify(metrics);
+    expect(serializedMetrics).not.toContain(requestPath);
+    expect(serializedMetrics).not.toContain("599");
+    expect(serializedMetrics).not.toContain("read-media");
+  });
+
+  it("preserves the classified response when the metric recorder fails", async () => {
+    let records = 0;
+    const response = await call(
+      {
+        metricRecorder: {
+          record() {
+            records += 1;
+            throw new Error("metric destination unavailable");
+          },
+        },
+      },
+      "/v1/markdown/list",
+      { headers: authorized },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true });
+    expect(records).toBe(2);
   });
 });

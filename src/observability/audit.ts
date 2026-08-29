@@ -1,6 +1,8 @@
 import pino from "pino";
 
 import type { AuthenticatedPrincipal } from "../auth/principal.js";
+import { isWellFormedUtf16 } from "../domain/markdown.js";
+import type { DriveProviderFailure } from "../drive/provider-error.js";
 
 export type MarkdownApiOperation =
   | "list_markdown"
@@ -48,6 +50,8 @@ export interface MarkdownApiAuditEvent {
   readonly statusCode: number;
   readonly durationMs: number;
   readonly fileId?: string;
+  readonly dependency?: "drive";
+  readonly dependencyFailure?: DriveProviderFailure;
   readonly resultCount?: number;
 }
 
@@ -56,17 +60,68 @@ export interface AuditLogger {
   info(event: MarkdownApiAuditEvent): void;
 }
 
+export type MarkdownMetricObservation =
+  | Readonly<{
+      readonly metric: "gateway_http_requests_total";
+      readonly operation: MarkdownApiOperation;
+      readonly principalKind: AuditPrincipal["kind"];
+      readonly result: MarkdownApiAuditResult;
+    }>
+  | Readonly<{
+      readonly metric: "gateway_http_request_duration_ms";
+      readonly operation: MarkdownApiOperation;
+      readonly result: MarkdownApiAuditResult;
+      readonly value: number;
+    }>
+  | Readonly<{
+      readonly metric: "gateway_http_in_flight";
+      readonly operation: MarkdownApiOperation;
+      readonly value: -1 | 1;
+    }>
+  | Readonly<{
+      readonly metric: "gateway_rate_limit_rejections_total";
+      readonly operation: MarkdownApiOperation;
+      readonly principalKind: AuditPrincipal["kind"];
+    }>
+  | Readonly<{
+      readonly metric: "gateway_request_timeouts_total";
+      readonly operation: MarkdownApiOperation;
+    }>
+  | Readonly<{
+      readonly metric: "gateway_dependency_failures_total";
+      readonly operation: MarkdownApiOperation;
+      readonly dependency: "drive";
+      readonly failure: DriveProviderFailure;
+    }>;
+
+/** A typed seam with no labels API; composition chooses any future backend. */
+export interface MetricRecorder {
+  record(observation: MarkdownMetricObservation): void;
+}
+
+export const noOpMetricRecorder: MetricRecorder = {
+  record: () => undefined,
+};
+
 const pinoOptions = {
   redact: {
     paths: [
       "authorization",
       "token",
+      "secret",
       "content",
       "password",
+      "path",
+      "query",
+      "revision",
       "*.authorization",
       "*.token",
+      "*.secret",
       "*.content",
       "*.password",
+      "*.path",
+      "*.query",
+      "*.revision",
     ],
     censor: "[REDACTED]",
   },
@@ -83,6 +138,7 @@ export function createPinoAuditLogger(
 
 function isSafeAuditString(value: string): boolean {
   return (
+    isWellFormedUtf16(value) &&
     value.trim().length > 0 &&
     Buffer.byteLength(value, "utf8") <= 512 &&
     ![...value].some((character) => {

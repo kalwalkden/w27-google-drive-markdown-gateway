@@ -47,11 +47,13 @@ document bodies.
 The record at [client-validation-record.example.json](client-validation-record.example.json) is a
 synthetic template. It is release evidence only and has no effect on `WriteGateDecision`.
 
-For ChatGPT Work, record the private plugin build and MCP origin identifiers, OAuth issuer,
+For ChatGPT Work, record the private plugin build and exact `/mcp` endpoint identifiers, OAuth issuer,
 audience, redirect URI and JWKS key identifiers, the scoped Work principal identifier, a successful
-read test, and the expected write-approval behavior. Validate OAuth/JWT configuration with the
-actual private plugin only after deployment; retain identifiers and digests, never tokens, JWTs,
-cookies, authorization codes, URLs containing query strings, or secret locations.
+read test, and the expected `UNSUPPORTED` result for create, update, and archive while production
+has no write session. Archive success remains blocked until atomic destination-topology proof and a
+separately approved production write composition. Validate OAuth/JWT configuration with the actual
+private plugin only after deployment; retain identifiers and digests, never tokens, JWTs, cookies,
+authorization codes, URLs containing query strings, or secret locations.
 
 For Codex cloud, record the environment/revision identifier, exact gateway-hostname identifier,
 the narrow methods needed by the client, separate principal key identifier, health/read tests, and

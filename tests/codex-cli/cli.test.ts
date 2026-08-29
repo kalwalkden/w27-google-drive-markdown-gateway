@@ -363,6 +363,62 @@ describe("md-drive", () => {
     expect(calls).toBe(1);
   });
 
+  it("uses the create caller path as conflict recovery locator", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "md-drive-create-conflict-"),
+    );
+    const file = join(directory, "content.md");
+    await writeFile(file, "content", "utf8");
+    try {
+      const result = run(
+        ["create", "docs/new.md", "--file", file],
+        async () =>
+          new Response(
+            JSON.stringify({
+              ok: false,
+              operationId: "operation",
+              error: {
+                code: "CONFLICT",
+                message: "Markdown revision conflict.",
+              },
+            }),
+            { status: 409 },
+          ),
+      );
+      await expect(result.code).resolves.toBe(8);
+      expect(JSON.parse(result.stdout[0])).toMatchObject({
+        recovery: { action: "read", locator: { path: "docs/new.md" } },
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("caps list output at 100 metadata records", async () => {
+    const item = {
+      relativePath: "file.md",
+      fileId: "file",
+      revision: "revision",
+      modifiedTime: "2026-01-01T00:00:00.000Z",
+      size: 0,
+    };
+    for (const count of [100, 101]) {
+      const result = run(
+        ["list"],
+        async () =>
+          new Response(
+            JSON.stringify({
+              ok: true,
+              operationId: "operation",
+              data: { items: Array.from({ length: count }, () => item) },
+            }),
+            { status: 200 },
+          ),
+      );
+      await expect(result.code).resolves.toBe(count === 100 ? 0 : 5);
+    }
+  });
+
   it("maps create, update, and archive exactly once with their JSON request bodies", async () => {
     const directory = await mkdtemp(join(tmpdir(), "md-drive-cli-"));
     const file = join(directory, "content.md");

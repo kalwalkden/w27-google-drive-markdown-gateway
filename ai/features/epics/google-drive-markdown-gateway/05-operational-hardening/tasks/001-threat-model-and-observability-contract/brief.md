@@ -2,7 +2,7 @@
 
 ## Status
 
-Approved
+Complete
 
 ## Context
 
@@ -39,4 +39,3 @@ Depends on service audit logging and deployment design.
 ## Open Questions
 
 None.
-

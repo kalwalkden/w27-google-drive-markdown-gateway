@@ -23,15 +23,22 @@ describe("ChatGPT Work private package", () => {
     expect(template).toMatchObject({
       templateKind: "operator-input-record-not-a-work-manifest",
       platformProfile: { status: "operator-must-verify-current-tenant-format" },
-      mcp: { httpsOriginPlaceholder: "https://example-mcp-origin.invalid" },
+      mcp: { httpsMcpEndpointPlaceholder: "https://gateway.invalid/mcp" },
     });
     expect(template.mcp.requiredToolNames).toEqual(tools);
     expect(template.safety).toMatchObject({
       tenantValuesRemainOutsideGit: true,
       endpointMustUseHttpsWithoutCredentialsQueryOrFragment: true,
       packageDoesNotGrantWriteAuthority: true,
+      productionWriteSessionPresent: false,
+      productionWriteOutcomeWithoutSession: "UNSUPPORTED",
+      archiveSuccessBlockedUntilAtomicDestinationTopologyProof: true,
+      archiveSuccessRequiresSeparatelyApprovedProductionWriteComposition: true,
     });
-    expect(template.mcp.httpsOriginPlaceholder).not.toMatch(/[?#@]/u);
+    expect(template.mcp.httpsMcpEndpointPlaceholder).toBe(
+      "https://gateway.invalid/mcp",
+    );
+    expect(template.mcp.httpsMcpEndpointPlaceholder).not.toMatch(/[?#@]/u);
   });
 
   it("contains read-before-write, stale-conflict, archive-confirmation, and fail-closed guidance", async () => {
@@ -52,14 +59,22 @@ describe("ChatGPT Work private package", () => {
     expect(readme).toMatch(
       /never issue a\s+write lease or bypass the write gate/u,
     );
-    expect(checklist).toMatch(/Never delete, trash, share/u);
+    expect(instructions + checklist + readme).toMatch(
+      /`create_markdown`, `update_markdown`, and `archive_markdown`[\s\S]{0,180}`UNSUPPORTED`/u,
+    );
+    expect(checklist).toMatch(/exact `\/mcp` path/u);
+    expect(checklist).toMatch(
+      /BLOCKED until atomic destination-topology proof and a\s+separately approved production write composition/u,
+    );
+    expect(checklist).toMatch(/Never delete, trash,\s+share/u);
   });
 
   it("keeps the evidence template sanitized and non-authoritative", async () => {
     const evidence = JSON.parse(await asset("release-evidence.template.json"));
     expect(evidence).toMatchObject({
-      writeApprovalBehavior: "not-run",
-      cleanupStatus: "incomplete",
+      mcpEndpointIdentifier: "https://gateway.invalid/mcp",
+      writeApprovalBehavior: "UNSUPPORTED-expected-without-write-session",
+      cleanupStatus: "not-applicable",
       writeGateDecisionInput: false,
     });
     expect(Object.keys(evidence.operationOutcomes)).toEqual([

@@ -14,4 +14,11 @@ unavailable when the gateway has no independently authorized write session.
 Private Work installation, a tool annotation, tenant registration, or an
 observed user interface does not grant write authority. Before
 `archive_markdown`, request explicit user confirmation unless the user already
-asked to archive. Archive is a revision-matched move, not permanent deletion.
+asked to archive.
+
+Current production has no write session: `create_markdown`, `update_markdown`,
+and `archive_markdown` must each return `UNSUPPORTED`. Treat this as the
+expected fail-closed result, not a reason to retry, bypass the gateway, or use
+another client. Archive success is BLOCKED until atomic destination-topology
+proof and a separately approved production write composition exist. No tool
+permanently deletes a document.

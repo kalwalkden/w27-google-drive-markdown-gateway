@@ -8,16 +8,17 @@ see [codex-cloud-preflight.md](codex-cloud-preflight.md).
 ## Current status
 
 This repository currently runs locally. No Codex cloud session, deployed
-gateway, credentials, or tenant/platform controls are available here. Prior
-cloud setup failed, so live validation is **BLOCKED** until an operator verifies
-the current platform controls in a clean cloud environment. Local runtime can
-select a subagent model explicitly; do not infer that a cloud runtime can.
+gateway, credentials, or tenant/platform controls are available here. Live
+validation is **BLOCKED** until an operator verifies the current platform
+controls in a clean cloud environment. Local runtime can select a subagent
+model explicitly; do not infer that a cloud runtime can.
 
 ## Operator setup
 
 1. Check out the approved revision, run `./scripts/verify-vendored-skills.sh`,
-   then build the checked-in client with `pnpm build`. Do not globally install a
-   client or download an unpinned package.
+   then build the checked-in client with `pnpm build`. Run it as
+   `node dist/codex-cli/cli.js`; do not globally install a client or download
+   an unpinned package.
 2. In the current Codex cloud environment controls, verify and record whether
    project secret injection and exact-hostname egress controls are available.
    Do not assume a UI label or configuration schema. If method controls are

@@ -497,7 +497,7 @@ function successData(operation: string, data: unknown): boolean {
     return (
       exactKeys(record, ["items"]) &&
       Array.isArray(record.items) &&
-      record.items.length <= 1_000 &&
+      record.items.length <= 100 &&
       record.items.every((item) => metadata(item))
     );
   if (operation === "search_markdown")
@@ -625,7 +625,11 @@ export async function main(
       await responseJson(response),
       response.status,
       call.operation,
-      "locator" in parsed.command ? parsed.command.locator : undefined,
+      "locator" in parsed.command
+        ? parsed.command.locator
+        : parsed.command.kind === "create"
+          ? { path: parsed.command.path }
+          : undefined,
     );
     stdout(`${JSON.stringify(result)}\n`);
     if (result.ok) return 0;

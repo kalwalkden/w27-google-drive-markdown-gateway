@@ -4,14 +4,14 @@
   "releaseDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
   "chatgptWork": {
     "pluginBuildIdentifier": "example-plugin-build",
-    "mcpOriginIdentifier": "example-mcp-origin",
+    "mcpEndpointIdentifier": "https://gateway.invalid/mcp",
     "oauthIssuerIdentifier": "example-issuer",
     "oauthAudienceIdentifier": "example-audience",
     "oauthRedirectUriIdentifier": "example-redirect-uri",
     "jwksKeyIdentifier": "example-jwks-key",
     "principalIdentifier": "example-work-principal",
     "readCheck": "passed",
-    "writeApprovalCheck": "passed"
+    "writeWithoutSessionCheck": "UNSUPPORTED-expected"
   },
   "codexCloud": {
     "environmentIdentifier": "example-environment",

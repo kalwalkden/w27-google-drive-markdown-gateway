@@ -3,7 +3,7 @@
   "releaseDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
   "privatePluginBuildIdentifier": "example-private-plugin-build",
   "workPlatformRevisionIdentifier": "example-work-platform-revision",
-  "mcpOriginIdentifier": "example-mcp-origin",
+  "mcpEndpointIdentifier": "https://gateway.invalid/mcp",
   "principalIdentifier": "example-work-principal",
   "operationOutcomes": {
     "list_markdown": "not-run",
@@ -14,7 +14,8 @@
     "staleUpdateConflict": "not-run",
     "archive_markdown": "not-run"
   },
-  "writeApprovalBehavior": "not-run",
-  "cleanupStatus": "incomplete",
+  "writeApprovalBehavior": "UNSUPPORTED-expected-without-write-session",
+  "archiveSuccess": "BLOCKED-pending-atomic-destination-topology-proof-and-approved-production-write-composition",
+  "cleanupStatus": "not-applicable",
   "writeGateDecisionInput": false
 }

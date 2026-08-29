@@ -377,3 +377,20 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
   disabled archive, and no delete/trash/retry path.
 - Validation: full combined `CI=true pnpm check` passed with 208 tests.
 - Status: complete; grouped-epic archival checklist update follows
+
+## 2026-08-29 — Integrated client repairs and operational observability
+
+- Work MCP is now composed at the production `/mcp` route with the same bounded service and
+  principal verifier as the JSON API. Work writes remain explicitly unavailable because production
+  has no approved write session; package guidance records archive as blocked rather than implying
+  an unsafe cleanup path.
+- The Codex verification harness now runs a syntactically valid six-operation CLI flow, validates
+  exact envelopes and state changes, keeps sensitive locators and content only in memory, and writes
+  only sanitized evidence after cleanup.
+- Operational hardening task 001 adds a current-state threat model, a closed observability contract,
+  bounded terminal metrics, private Drive-failure categories, and sink-failure isolation. Metrics do
+  not carry paths, file IDs, revisions, bodies, credentials, or provider messages.
+- Validation: full combined `CI=true pnpm check` passed with 219 tests, build verification, and 10
+  vendored skills. No live Drive, Work, Codex cloud, credential, or external network call ran.
+- Status: Work and Codex feature repairs await fresh feature review; operational task 001 complete
+  and awaits independent task review.

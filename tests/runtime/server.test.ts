@@ -1,3 +1,9 @@
+import { once } from "node:events";
+import type { AddressInfo } from "node:net";
+
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import express from "express";
 import { describe, expect, it } from "vitest";
 
 import type { SecretFileReference } from "../../src/config/service-config.js";
@@ -92,7 +98,11 @@ describe("runtime composition", () => {
       },
       createApiApp: (dependencies) => {
         writeSessionProvider = dependencies.writeSessionProvider;
-        return { get() {} } as never;
+        return express();
+      },
+      createMcpApp: (dependencies) => {
+        expect(dependencies.writeSessionProvider).toBeUndefined();
+        return express();
       },
     });
 
@@ -136,8 +146,9 @@ describe("runtime composition", () => {
       }),
       createApiApp: (dependencies) => {
         service = dependencies.service;
-        return { get() {} } as never;
+        return express();
       },
+      createMcpApp: () => express(),
     });
 
     if (!service) throw new Error("runtime did not compose a service");
@@ -222,5 +233,96 @@ describe("runtime composition", () => {
     await expect(import("../../src/runtime/server.js")).resolves.toHaveProperty(
       "startRuntime",
     );
+  });
+
+  it("composes JSON and MCP routes with the same bounded dependencies", async () => {
+    let api: unknown;
+    let mcp: unknown;
+    const runtime = await composeRuntime(config("shared-drive-adc"), {
+      ...runtimeDependencies([]),
+      createApiApp: (dependencies) => {
+        api = dependencies;
+        return express();
+      },
+      createMcpApp: (dependencies) => {
+        mcp = dependencies;
+        return express();
+      },
+    });
+    if (!api || !mcp)
+      throw new Error("runtime did not compose both transports");
+    expect(api).toMatchObject({
+      config: runtime.config,
+      writeSessionProvider: undefined,
+    });
+    expect(mcp).toMatchObject({
+      config: runtime.config,
+      writeSessionProvider: undefined,
+    });
+    expect((api as { service: unknown }).service).toBe(
+      (mcp as { service: unknown }).service,
+    );
+    expect((api as { principalVerifier: unknown }).principalVerifier).toBe(
+      (mcp as { principalVerifier: unknown }).principalVerifier,
+    );
+  });
+
+  it("serves the real Work MCP protocol at exactly /mcp with Work-only auth", async () => {
+    let verified = 0;
+    const runtime = await composeRuntime(config("shared-drive-adc"), {
+      ...runtimeDependencies([]),
+      createVerifier: () => ({
+        async verify(value) {
+          verified += 1;
+          if (value === "Bearer work")
+            return { kind: "work-mcp", subject: "work", issuer: "issuer" };
+          return { kind: "codex", subject: "codex", issuer: "issuer" };
+        },
+      }),
+    });
+    const listener = runtime.app.listen(0, "127.0.0.1");
+    await once(listener, "listening");
+    const { port } = listener.address() as AddressInfo;
+    const endpoint = `http://127.0.0.1:${port}/mcp`;
+    try {
+      const client = new Client({ name: "runtime-test", version: "1.0.0" });
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL(endpoint), {
+          requestInit: { headers: { Authorization: "Bearer work" } },
+        }),
+      );
+      await expect(client.listTools()).resolves.toMatchObject({
+        tools: expect.arrayContaining([
+          expect.objectContaining({ name: "list_markdown" }),
+          expect.objectContaining({ name: "archive_markdown" }),
+        ]),
+      });
+      await client.close();
+
+      const nonWork = await fetch(`${endpoint}/mcp`, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer codex",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      });
+      expect(nonWork.status).toBe(404);
+
+      const unauthorized = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer codex",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
+      });
+      expect(unauthorized.status).toBe(401);
+      expect(verified).toBeGreaterThanOrEqual(2);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        listener.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
   });
 });

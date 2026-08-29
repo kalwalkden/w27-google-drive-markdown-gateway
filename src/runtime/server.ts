@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import express, { type Express } from "express";
 
 import { MarkdownService } from "../application/markdown-service.js";
 import type { PrincipalVerifier } from "../auth/principal.js";
@@ -12,6 +12,11 @@ import {
   createJsonApiApp,
   type JsonApiDependencies,
 } from "../http/json-api.js";
+import {
+  createStatelessMcpApp,
+  type StatelessMcpDependencies,
+} from "../mcp/stateless-mcp.js";
+import type { MetricRecorder } from "../observability/audit.js";
 import {
   loadOAuthCredentials,
   type OAuthSecretReader,
@@ -39,6 +44,8 @@ export interface RuntimeDependencies {
   ) => ConstructorParameters<typeof MarkdownService>[0];
   readonly createVerifier?: (config: ServiceConfig) => PrincipalVerifier;
   readonly createApiApp?: (dependencies: JsonApiDependencies) => Express;
+  readonly metricRecorder?: MetricRecorder;
+  readonly createMcpApp?: (dependencies: StatelessMcpDependencies) => Express;
   readonly listen?: (app: Express, port: number) => RuntimeListener;
   readonly waitForListener?: (listener: RuntimeListener) => Promise<void>;
   readonly registerSigterm?: (handler: () => void) => void;
@@ -89,8 +96,9 @@ function readAdapterConfig(
 }
 
 /**
- * Creates the API only after bounded configuration parsing. It leaves write sessions absent, so
- * the JSON API retains its default-disabled write behavior.
+ * Creates the JSON and Work MCP APIs only after bounded configuration parsing.
+ * It leaves write sessions absent, so both transports retain default-disabled
+ * write behavior.
  */
 export async function composeRuntime(
   configJson: unknown,
@@ -117,13 +125,30 @@ export async function composeRuntime(
     maxSearchLimit: config.http.maxResultItems,
     maxListResults: config.http.maxResultItems,
   });
-  const app = (dependencies.createApiApp ?? createJsonApiApp)({
+  const principalVerifier = (
+    dependencies.createVerifier ?? createPrincipalVerifier
+  )(config);
+  const apiDependencies: JsonApiDependencies = {
     config,
     service,
-    principalVerifier: (dependencies.createVerifier ?? createPrincipalVerifier)(
+    principalVerifier,
+    writeSessionProvider: undefined,
+    ...(dependencies.metricRecorder === undefined
+      ? {}
+      : { metricRecorder: dependencies.metricRecorder }),
+  };
+  const app = express();
+  app.use((dependencies.createApiApp ?? createJsonApiApp)(apiDependencies));
+  // The MCP app owns its exact /mcp route, so mount it at the root rather
+  // than under /mcp (which would expose /mcp/mcp instead).
+  app.use(
+    (dependencies.createMcpApp ?? createStatelessMcpApp)({
       config,
-    ),
-  });
+      service,
+      principalVerifier,
+      writeSessionProvider: undefined,
+    }),
+  );
   return { config, app };
 }
 

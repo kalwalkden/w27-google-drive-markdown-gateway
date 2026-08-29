@@ -6,7 +6,7 @@
     "privatePluginBuildIdentifier": "example-private-plugin-build"
   },
   "mcp": {
-    "httpsOriginPlaceholder": "https://example-mcp-origin.invalid",
+    "httpsMcpEndpointPlaceholder": "https://gateway.invalid/mcp",
     "requiredToolNames": [
       "list_markdown",
       "search_markdown",
@@ -28,6 +28,10 @@
   "safety": {
     "tenantValuesRemainOutsideGit": true,
     "endpointMustUseHttpsWithoutCredentialsQueryOrFragment": true,
-    "packageDoesNotGrantWriteAuthority": true
+    "packageDoesNotGrantWriteAuthority": true,
+    "productionWriteSessionPresent": false,
+    "productionWriteOutcomeWithoutSession": "UNSUPPORTED",
+    "archiveSuccessBlockedUntilAtomicDestinationTopologyProof": true,
+    "archiveSuccessRequiresSeparatelyApprovedProductionWriteComposition": true
   }
 }

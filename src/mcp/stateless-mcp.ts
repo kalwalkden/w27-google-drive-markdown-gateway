@@ -215,7 +215,39 @@ function archiveInputSchema() {
     .strict();
 }
 
-function toolSuccess(data: unknown) {
+const mcpResponseEnvelopeAllowanceBytes = 512;
+
+/**
+ * The SDK serializes tool content twice: once as text and once as structured
+ * content. Reserve a small, fixed amount for the JSON-RPC result envelope as
+ * well, so a bounded service result cannot bypass the configured wire limit.
+ */
+function exceedsMcpResponseLimit(data: unknown, maximumBytes: number): boolean {
+  try {
+    const structuredContent = { ok: true as const, data };
+    const toolResult = {
+      content: [
+        { type: "text" as const, text: JSON.stringify(structuredContent) },
+      ],
+      structuredContent,
+    };
+    return (
+      Buffer.byteLength(JSON.stringify(toolResult), "utf8") +
+        mcpResponseEnvelopeAllowanceBytes >
+      maximumBytes
+    );
+  } catch {
+    return true;
+  }
+}
+
+function toolSuccess(data: unknown, maximumBytes: number) {
+  if (exceedsMcpResponseLimit(data, maximumBytes)) {
+    return toolFailure({
+      code: "RESULT_LIMIT_EXCEEDED",
+      message: "Result exceeds the configured response limit.",
+    });
+  }
   const structuredContent = { ok: true as const, data };
   return {
     content: [
@@ -305,7 +337,7 @@ function registerTools(
     dependencies.writeSessionProvider ?? disabledWriteSessionProvider;
   const withFailure = async (work: () => Promise<unknown>) => {
     try {
-      return toolSuccess(await work());
+      return toolSuccess(await work(), config.http.maxJsonResponseBytes);
     } catch (error) {
       return toolFailure(publicToolError(error));
     }

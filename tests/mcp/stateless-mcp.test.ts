@@ -551,6 +551,57 @@ describe("stateless MCP adapter", () => {
     }
   });
 
+  it("enforces the configured MCP wire cap before emitting a successful tool result", async () => {
+    let reads = 0;
+    let content = "n".repeat(1_200);
+    const fixture = await start({
+      service: {
+        async listMarkdown() {
+          return [];
+        },
+        async searchMarkdown() {
+          return [];
+        },
+        async readMarkdown() {
+          reads += 1;
+          return { ...metadata, content };
+        },
+      },
+    });
+    try {
+      const client = await fixture.connect();
+      await expect(
+        client.callTool({
+          name: "read_markdown",
+          arguments: { fileId: "guide-file" },
+        }),
+      ).resolves.toMatchObject({
+        structuredContent: { ok: true, data: { content } },
+      });
+
+      content = "SENTINEL-OVERSIZE-CONTENT-".repeat(100);
+      const oversized = await client.callTool({
+        name: "read_markdown",
+        arguments: { fileId: "guide-file" },
+      });
+      expect(reads).toBe(2);
+      expect(structured(oversized)).toEqual({
+        ok: false,
+        error: {
+          code: "RESULT_LIMIT_EXCEEDED",
+          message: "Result exceeds the configured response limit.",
+        },
+      });
+      expect("content" in oversized && oversized.isError).toBe(true);
+      expect(JSON.stringify(oversized)).not.toContain(
+        "SENTINEL-OVERSIZE-CONTENT",
+      );
+      await client.close();
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("treats a write-session provider failure as an unavailable write", async () => {
     const fixture = await start({
       writeSessionProvider: {

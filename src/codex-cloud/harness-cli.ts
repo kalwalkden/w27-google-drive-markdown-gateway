@@ -5,20 +5,24 @@ import { lstat, open, readFile } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { type CommandRunner, confirmation, runHarness } from "./harness.js";
+import {
+  assertSanitizedEvidence,
+  type CommandRunner,
+  confirmation,
+  runHarness,
+} from "./harness.js";
 
 const maximumOutputBytes = 1_048_576;
 
-function isOutside(path: string, root: string): boolean {
+export function isOutsideRepository(path: string, root: string): boolean {
   const value = relative(root, path);
   return (
-    Boolean(value) &&
-    value !== ".." &&
-    !value.startsWith(`..${process.platform === "win32" ? "\\\\" : "/"}`)
+    value === ".." ||
+    value.startsWith(`..${process.platform === "win32" ? "\\\\" : "/"}`)
   );
 }
 
-function parseArgs(args: readonly string[]): {
+export function parseHarnessArgs(args: readonly string[]): {
   configPath: string;
   outputPath: string;
 } {
@@ -50,7 +54,7 @@ async function externalRegularFile(
   root: string,
 ): Promise<string> {
   const resolved = resolve(path);
-  if (!isOutside(resolved, root)) throw new Error("repository-path");
+  if (!isOutsideRepository(resolved, root)) throw new Error("repository-path");
   const stat = await lstat(resolved);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("unsafe-file");
   return resolved;
@@ -96,11 +100,12 @@ function mdDriveRunner(): CommandRunner {
 
 export async function main(args = process.argv.slice(2)): Promise<number> {
   try {
-    const parsed = parseArgs(args);
+    const parsed = parseHarnessArgs(args);
     const root = resolve(".");
     const configPath = await externalRegularFile(parsed.configPath, root);
     const outputPath = resolve(parsed.outputPath);
-    if (!isOutside(outputPath, root)) throw new Error("repository-path");
+    if (!isOutsideRepository(outputPath, root))
+      throw new Error("repository-path");
     const config = JSON.parse(await readFile(configPath, "utf8"));
     const output = await open(
       outputPath,
@@ -108,7 +113,9 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
       0o600,
     );
     try {
-      const evidence = await runHarness(config, confirmation, mdDriveRunner());
+      const evidence = assertSanitizedEvidence(
+        await runHarness(config, confirmation, mdDriveRunner()),
+      );
       await output.writeFile(`${JSON.stringify(evidence)}\n`, "utf8");
       return evidence.staleConflict === "passed" &&
         evidence.cleanup === "passed"

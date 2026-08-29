@@ -25,15 +25,20 @@ import {
   MarkdownGatewayError,
   revision,
 } from "../domain/markdown.js";
-import { DriveProviderError } from "../drive/provider-error.js";
+import {
+  DriveProviderError,
+  type DriveProviderFailure,
+} from "../drive/provider-error.js";
 import {
   type AuditLogger,
   auditFileId,
   auditPrincipal,
   createPinoAuditLogger,
+  type MetricRecorder,
   type MarkdownApiAuditEvent,
   type MarkdownApiAuditResult,
   type MarkdownApiOperation,
+  noOpMetricRecorder,
 } from "../observability/audit.js";
 import {
   FixedWindowPrincipalRateLimiter,
@@ -58,6 +63,7 @@ export interface JsonApiDependencies {
   readonly principalVerifier: PrincipalVerifier;
   readonly writeSessionProvider?: WriteSessionProvider;
   readonly auditLogger?: AuditLogger;
+  readonly metricRecorder?: MetricRecorder;
   readonly rateLimiter?: PrincipalRateLimiter;
   readonly now?: () => number;
   readonly operationId?: () => string;
@@ -105,6 +111,7 @@ interface PublicFailure {
   readonly message: string;
   readonly result: MarkdownApiAuditResult;
   readonly retryAfterSeconds?: number;
+  readonly dependencyFailure?: DriveProviderFailure;
 }
 
 const requestContext = Symbol("markdown-api-request-context");
@@ -198,7 +205,15 @@ const failure = (
   message: string,
   result: MarkdownApiAuditResult,
   retryAfterSeconds?: number,
-): PublicFailure => ({ status, code, message, result, retryAfterSeconds });
+  dependencyFailure?: DriveProviderFailure,
+): PublicFailure => ({
+  status,
+  code,
+  message,
+  result,
+  retryAfterSeconds,
+  dependencyFailure,
+});
 
 const invalidRequest = (): PublicFailure =>
   failure(
@@ -292,6 +307,8 @@ function publicFailure(error: unknown): PublicFailure {
       "UPSTREAM_UNAVAILABLE",
       "Service dependency is unavailable.",
       "upstream_unavailable",
+      undefined,
+      error.failure,
     );
   return failure(500, "INTERNAL", "Internal server error.", "internal");
 }
@@ -354,6 +371,7 @@ export function createJsonApiApp(dependencies: JsonApiDependencies): Express {
   app.set("case sensitive routing", true);
   const { config, principalVerifier, service } = dependencies;
   const auditLogger = dependencies.auditLogger ?? createPinoAuditLogger();
+  const metricRecorder = dependencies.metricRecorder ?? noOpMetricRecorder;
   const now = dependencies.now ?? (() => performance.now());
   const operationId = dependencies.operationId ?? randomUUID;
   const rateLimiter =
@@ -378,7 +396,11 @@ export function createJsonApiApp(dependencies: JsonApiDependencies): Express {
     outcome: MarkdownApiAuditResult,
     statusCode: number,
     body: string,
-    options: Readonly<{ fileId?: string; resultCount?: number }> = {},
+    options: Readonly<{
+      fileId?: string;
+      resultCount?: number;
+      dependencyFailure?: DriveProviderFailure;
+    }> = {},
   ): void => {
     const context = request[requestContext];
     if (!context || context.completed) return;
@@ -395,16 +417,66 @@ export function createJsonApiApp(dependencies: JsonApiDependencies): Express {
       statusCode,
       durationMs: Math.max(0, Math.round(now() - context.startedAt)),
       ...(safeFileId === undefined ? {} : { fileId: safeFileId }),
+      ...(options.dependencyFailure === undefined
+        ? {}
+        : {
+            dependency: "drive" as const,
+            dependencyFailure: options.dependencyFailure,
+          }),
       ...(options.resultCount === undefined
         ? {}
         : { resultCount: options.resultCount }),
     };
+    const principal = event.principal;
+    const durationMs = event.durationMs;
     try {
       auditLogger.info(event);
     } catch {
       // An unavailable audit sink cannot strand an already-classified API response.
     } finally {
       releaseReservation(context);
+    }
+    try {
+      metricRecorder.record({
+        metric: "gateway_http_requests_total",
+        operation: context.operation,
+        principalKind: principal.kind,
+        result: outcome,
+      });
+      metricRecorder.record({
+        metric: "gateway_http_request_duration_ms",
+        operation: context.operation,
+        result: outcome,
+        value: durationMs,
+      });
+      metricRecorder.record({
+        metric: "gateway_http_in_flight",
+        operation: context.operation,
+        value: -1,
+      });
+      if (outcome === "rate_limited") {
+        metricRecorder.record({
+          metric: "gateway_rate_limit_rejections_total",
+          operation: context.operation,
+          principalKind: principal.kind,
+        });
+      }
+      if (outcome === "timeout") {
+        metricRecorder.record({
+          metric: "gateway_request_timeouts_total",
+          operation: context.operation,
+        });
+      }
+      if (options.dependencyFailure !== undefined) {
+        metricRecorder.record({
+          metric: "gateway_dependency_failures_total",
+          operation: context.operation,
+          dependency: "drive",
+          failure: options.dependencyFailure,
+        });
+      }
+    } catch {
+      // Telemetry availability cannot affect an already-classified response.
     }
     if (response.headersSent) return;
     response.set("Cache-Control", "no-store");
@@ -442,6 +514,9 @@ export function createJsonApiApp(dependencies: JsonApiDependencies): Express {
         operationId: context.operationId,
         error: { code: reason.code, message: reason.message },
       }),
+      {
+        dependencyFailure: reason.dependencyFailure,
+      },
     );
   };
 
@@ -460,6 +535,15 @@ export function createJsonApiApp(dependencies: JsonApiDependencies): Express {
         completed: false,
       };
       request[requestContext] = context;
+      try {
+        metricRecorder.record({
+          metric: "gateway_http_in_flight",
+          operation,
+          value: 1,
+        });
+      } catch {
+        // Telemetry availability cannot affect request handling.
+      }
       context.deadlineTimer = setTimeout(() => {
         respondFailure(request, response, timedOut());
       }, config.http.requestTimeoutMs);
