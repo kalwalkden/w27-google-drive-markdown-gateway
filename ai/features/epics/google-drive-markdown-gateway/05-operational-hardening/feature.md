@@ -2,7 +2,7 @@
 
 ## Status
 
-Approved
+Complete
 
 ## Requirements
 
@@ -27,4 +27,3 @@ Builds on service logging and Terraform from `02-authenticated-service-api` plus
 ## Open Questions
 
 None.
-

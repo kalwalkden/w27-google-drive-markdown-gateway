@@ -24,5 +24,5 @@ General Drive access, Google Workspace document editing, sharing changes, perman
 - [ ] 03-chatgpt-work-plugin — Expose the same service through stateless remote MCP.
 - [ ] 04-codex-cloud-client — Provide a diagnostics and fallback CLI with Codex cloud setup guidance.
 - [ ] 07-production-write-and-tree-support — Close the direct-root, disabled-write, and unavailable-archive product gap.
-- [ ] 05-operational-hardening — Add resilience coverage, observability, recovery, and rotation practices.
+- [x] 05-operational-hardening — Add resilience coverage, observability, recovery, and rotation practices.
 - [ ] 06-migrate-planning-files — Migrate and verify the agreed Drive-backed planning workflow.

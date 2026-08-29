@@ -513,3 +513,14 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - Terraform formatting/validation remains an operator gate because Terraform is not installed.
 - No live credential, Drive, cloud, Work, Codex, Terraform apply, or external network call ran.
 - Status: complete.
+
+## 2026-08-29 — 05-operational-hardening final acceptance
+
+- Independent feature review: `gpt-5.6-sol`, high reasoning, fresh read-only context.
+- Verdict: Ready, with no findings after the Terraform tree-budget projection repair.
+- Verified typed/redacted JSON and MCP telemetry, bounded JWT lifetime, resilience and failure
+  classification, JSON-only deadline/rate-limit alert math, rotation/recovery/incident procedures,
+  sanitized exercise evidence, and factual transitional write/archive documentation.
+- Validation: full combined `CI=true pnpm check` passed with 253 tests. Terraform native validation
+  remains an explicit operator gate because the executable is unavailable locally.
+- Status: complete; grouped-epic archival checklist update follows.
