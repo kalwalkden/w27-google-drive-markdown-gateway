@@ -22,7 +22,7 @@ General Drive access, Google Workspace document editing, sharing changes, perman
 - [x] 01-drive-core — Implement folder-confined Markdown operations behind one application boundary.
 - [x] 02-authenticated-service-api — Add authenticated JSON HTTPS service, auditability, and deployment.
 - [x] 03-chatgpt-work-plugin — Expose the same service through stateless remote MCP.
-- [ ] 04-codex-cloud-client — Provide a diagnostics and fallback CLI with Codex cloud setup guidance.
+- [x] 04-codex-cloud-client — Provide a diagnostics and fallback CLI with Codex cloud setup guidance.
 - [x] 07-production-write-and-tree-support — Close the direct-root, disabled-write, and unavailable-archive product gap.
 - [x] 05-operational-hardening — Add resilience coverage, observability, recovery, and rotation practices.
 - [ ] 06-migrate-planning-files — Migrate and verify the agreed Drive-backed planning workflow.

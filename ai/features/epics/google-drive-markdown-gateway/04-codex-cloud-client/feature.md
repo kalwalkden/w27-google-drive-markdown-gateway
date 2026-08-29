@@ -2,7 +2,7 @@
 
 ## Status
 
-Approved
+Complete
 
 ## Requirements
 
@@ -27,4 +27,3 @@ The CLI will consume the JSON contract from `02-authenticated-service-api`; `doc
 ## Open Questions
 
 None.
-
