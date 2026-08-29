@@ -50,10 +50,16 @@ validation sequence. Keep `ARCHITECTURE.md` aligned if these commands change.
 
 <!-- discover-architecture:start -->
 ## Architecture
+
 Full report: `ARCHITECTURE.md`
 
-- Lint/format: `CI=true pnpm lint`, `CI=true pnpm format:check`
-- Type-check: `CI=true pnpm typecheck`
-- Test: `CI=true pnpm test`
+- Domain policy: `src/domain/markdown.ts`, `src/application/markdown-service.ts`
+- Provider boundary: `src/drive/`; production composition: `src/runtime/server.ts`
+- External surfaces: `src/http/json-api.ts`, `src/mcp/stateless-mcp.ts`, `src/codex-cli/cli.ts`
+- Operator-only workflows: `src/live-drive/`, `src/codex-cloud/`, `src/planning-migration/`
+- Lint/format/type-check/test: `CI=true pnpm lint`, `CI=true pnpm format:check`,
+  `CI=true pnpm typecheck`, `CI=true pnpm test`
 - Full validation: `CI=true pnpm check`
+- Keep document rules in `MarkdownService`, compose write authority only in the runtime, and never
+  bypass `GuardedDriveWritePort` or automatically retry an `OUTCOME_UNKNOWN` mutation.
 <!-- discover-architecture:end -->
