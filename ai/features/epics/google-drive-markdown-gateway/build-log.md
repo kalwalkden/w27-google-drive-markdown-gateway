@@ -332,3 +332,15 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - Validation: full combined `CI=true pnpm check` passed with 200 tests, including the executable
   artifact self-check. No live service, Drive, client, credential, or external network call ran.
 - Status: repaired; final independent reruns pending
+
+## 2026-08-29 — 03-chatgpt-work-plugin / 002-work-plugin-package-and-live-harness
+
+- Implementation: `gpt-5.6-terra`, high reasoning. Added an isolated, secret-free private-package
+  checklist, safe agent instructions, tenant-registration runbook, operator-only validation steps,
+  and a sanitized non-authoritative evidence template.
+- The package exposes only the six MCP tools, uses `.invalid`/example placeholders, keeps OAuth/JWT
+  and tenant values out of Git, and states that installation/consent/evidence cannot issue a write
+  lease or make unavailable archive behavior succeed.
+- Validation: full combined `CI=true pnpm check` passed with 203 tests. No live plugin install,
+  Work/Drive/cloud call, credential, OAuth/JWKS request, or external network action ran.
+- Status: complete; independent feature review pending

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "releaseDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "privatePluginBuildIdentifier": "example-private-plugin-build",
+  "workPlatformRevisionIdentifier": "example-work-platform-revision",
+  "mcpOriginIdentifier": "example-mcp-origin",
+  "principalIdentifier": "example-work-principal",
+  "operationOutcomes": {
+    "list_markdown": "not-run",
+    "search_markdown": "not-run",
+    "read_markdown": "not-run",
+    "create_markdown": "not-run",
+    "update_markdown": "not-run",
+    "staleUpdateConflict": "not-run",
+    "archive_markdown": "not-run"
+  },
+  "writeApprovalBehavior": "not-run",
+  "cleanupStatus": "incomplete",
+  "writeGateDecisionInput": false
+}

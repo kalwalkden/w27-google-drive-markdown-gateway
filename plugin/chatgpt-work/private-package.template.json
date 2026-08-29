@@ -1,0 +1,33 @@
+{
+  "templateKind": "operator-input-record-not-a-work-manifest",
+  "platformProfile": {
+    "status": "operator-must-verify-current-tenant-format",
+    "workPlatformRevisionIdentifier": "example-work-platform-revision",
+    "privatePluginBuildIdentifier": "example-private-plugin-build"
+  },
+  "mcp": {
+    "httpsOriginPlaceholder": "https://example-mcp-origin.invalid",
+    "requiredToolNames": [
+      "list_markdown",
+      "search_markdown",
+      "read_markdown",
+      "create_markdown",
+      "update_markdown",
+      "archive_markdown"
+    ]
+  },
+  "serverConfigurationInputs": {
+    "issuerIdentifier": "example-work-issuer",
+    "audienceIdentifier": "example-work-audience",
+    "jwksUrlIdentifier": "example-work-jwks-url",
+    "jwksKeyIdentifier": "example-work-jwks-key",
+    "redirectUriIdentifier": "example-work-redirect-uri",
+    "allowedAlgorithmIdentifiers": ["example-signing-algorithm"],
+    "principalIdentifier": "example-work-principal"
+  },
+  "safety": {
+    "tenantValuesRemainOutsideGit": true,
+    "endpointMustUseHttpsWithoutCredentialsQueryOrFragment": true,
+    "packageDoesNotGrantWriteAuthority": true
+  }
+}
