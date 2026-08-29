@@ -2,7 +2,7 @@
 
 ## Status
 
-Approved
+Complete
 
 ## Goal
 
@@ -25,4 +25,4 @@ General Drive access, Google Workspace document editing, sharing changes, perman
 - [x] 04-codex-cloud-client — Provide a diagnostics and fallback CLI with Codex cloud setup guidance.
 - [x] 07-production-write-and-tree-support — Close the direct-root, disabled-write, and unavailable-archive product gap.
 - [x] 05-operational-hardening — Add resilience coverage, observability, recovery, and rotation practices.
-- [ ] 06-migrate-planning-files — Migrate and verify the agreed Drive-backed planning workflow.
+- [x] 06-migrate-planning-files — Migrate and verify the agreed Drive-backed planning workflow.
