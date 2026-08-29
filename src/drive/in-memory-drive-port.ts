@@ -39,7 +39,11 @@ export interface InMemoryNodeFixture {
 }
 
 interface MutableNode
-  extends Omit<DriveNode, "parentIds" | "revision" | "size" | "modifiedTime"> {
+  extends Omit<
+    DriveNode,
+    "name" | "parentIds" | "revision" | "size" | "modifiedTime"
+  > {
+  name: string;
   parentIds: FolderId[];
   revision?: Revision;
   size?: number;
@@ -276,6 +280,13 @@ export class InMemoryDrivePort implements DriveReadPort, RawDriveWritePort {
     const node = this.nodes.get(id);
     if (!node) throw new Error(`Unknown fixture id: ${id}`);
     node.parentIds = parentIds.map(folderId);
+    node.modifiedTime = this.timestamp();
+  }
+
+  setFixtureName(id: string, name: string): void {
+    const node = this.nodes.get(id);
+    if (!node) throw new Error(`Unknown fixture id: ${id}`);
+    node.name = name;
     node.modifiedTime = this.timestamp();
   }
 

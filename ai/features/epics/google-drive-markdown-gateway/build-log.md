@@ -514,6 +514,22 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - No live credential, Drive, cloud, Work, Codex, Terraform apply, or external network call ran.
 - Status: complete.
 
+## 2026-08-29 — 07-production-write-and-tree-support / 003-nested-mutations-and-archive
+
+- Implementation: `gpt-5.6-terra`, high reasoning. Connected the enabled deployment writer to one
+  shared JSON/MCP session and added nested create, exact-revision update, and exact-revision archive
+  with immediate topology/collision checks, one provider dispatch, and verified postconditions.
+- Added stable `OUTCOME_UNKNOWN` handling across domain, JSON, MCP, CLI, telemetry, and client
+  recovery guidance. Disabled deployment mode remains `UNSUPPORTED`; no retry, rollback, delete,
+  trash, or fallback mutation exists.
+- Premium independent review found incomplete post-state binding and an already-archived no-op race.
+  The implementation now compares full mutation-response facts to fresh post-state and revalidates
+  source/archive topology after final destination uniqueness checks. Fresh delta review found no
+  remaining issue.
+- Validation: full combined `CI=true pnpm check` passed with 257 tests.
+- No live credential, Drive, cloud, Work, Codex, or external network call ran.
+- Status: complete.
+
 ## 2026-08-29 — 05-operational-hardening final acceptance
 
 - Independent feature review: `gpt-5.6-sol`, high reasoning, fresh read-only context.

@@ -379,6 +379,215 @@ describe("MarkdownService", () => {
     });
   });
 
+  it("treats same-size edits after a raw success as outcome unknown", async () => {
+    const createFixture = fixture();
+    let createCalls = 0;
+    const createSession = new MarkdownService(
+      createFixture.drive,
+      {
+        rootFolderId: folderId("root"),
+        archiveFolderId: folderId("archive"),
+      },
+      writerFrom({
+        createFile: async (parent, name, content) => {
+          createCalls += 1;
+          const result = await createFixture.drive.createFile(
+            parent,
+            name,
+            content,
+          );
+          if (result.outcome === "success") {
+            await createFixture.drive.updateFile(
+              result.node.id as FileId,
+              result.node.revision as Revision,
+              "race",
+            );
+          }
+          return result;
+        },
+        updateFile: createFixture.drive.updateFile.bind(createFixture.drive),
+        moveFile: createFixture.drive.moveFile.bind(createFixture.drive),
+      }),
+    ).openWriteSession();
+    await expectCode(
+      () => createSession.createMarkdown({ path: "new.md", content: "safe" }),
+      "OUTCOME_UNKNOWN",
+    );
+    expect(createCalls).toBe(1);
+
+    const updateFixture = fixture();
+    let updateCalls = 0;
+    const updateSession = new MarkdownService(
+      updateFixture.drive,
+      {
+        rootFolderId: folderId("root"),
+        archiveFolderId: folderId("archive"),
+      },
+      writerFrom({
+        createFile: updateFixture.drive.createFile.bind(updateFixture.drive),
+        updateFile: async (id, expected, content) => {
+          updateCalls += 1;
+          const result = await updateFixture.drive.updateFile(
+            id,
+            expected,
+            content,
+          );
+          if (result.outcome === "success") {
+            await updateFixture.drive.updateFile(
+              id,
+              result.node.revision as Revision,
+              "race",
+            );
+          }
+          return result;
+        },
+        moveFile: updateFixture.drive.moveFile.bind(updateFixture.drive),
+      }),
+    ).openWriteSession();
+    await expectCode(
+      () =>
+        updateSession.updateMarkdown({
+          path: "root-file.md",
+          expectedRevision: revision("1"),
+          content: "safe",
+        }),
+      "OUTCOME_UNKNOWN",
+    );
+    expect(updateCalls).toBe(1);
+
+    const archiveFixture = fixture();
+    let moveCalls = 0;
+    const archiveSession = new MarkdownService(
+      archiveFixture.drive,
+      {
+        rootFolderId: folderId("root"),
+        archiveFolderId: folderId("archive"),
+      },
+      writerFrom({
+        createFile: archiveFixture.drive.createFile.bind(archiveFixture.drive),
+        updateFile: archiveFixture.drive.updateFile.bind(archiveFixture.drive),
+        moveFile: async (id, expected, source, destination) => {
+          moveCalls += 1;
+          const result = await archiveFixture.drive.moveFile(
+            id,
+            expected,
+            source,
+            destination,
+          );
+          if (result.outcome === "success") {
+            await archiveFixture.drive.updateFile(
+              id,
+              result.node.revision as Revision,
+              "race",
+            );
+          }
+          return result;
+        },
+      }),
+    ).openWriteSession();
+    await expectCode(
+      () =>
+        archiveSession.archiveMarkdown({
+          path: "root-file.md",
+          expectedRevision: revision("1"),
+        }),
+      "OUTCOME_UNKNOWN",
+    );
+    expect(moveCalls).toBe(1);
+  });
+
+  it("does not report a stale already-archived no-op", async () => {
+    const races: readonly {
+      readonly label: string;
+      readonly archiveListAt: number;
+      readonly mutate: (
+        drive: InMemoryDrivePort,
+        current: Revision,
+      ) => Promise<void>;
+    }[] = [
+      {
+        label: "source edit",
+        archiveListAt: 2,
+        mutate: async (drive, current) => {
+          const result = await drive.updateFile(
+            fileId("root-file"),
+            current,
+            "raced-content",
+          );
+          if (result.outcome !== "success")
+            throw new Error("race fixture edit failed");
+        },
+      },
+      {
+        label: "source rename",
+        archiveListAt: 2,
+        mutate: async (drive) => {
+          drive.setFixtureName("root-file", "renamed.md");
+        },
+      },
+      {
+        label: "archive ancestor move",
+        archiveListAt: 2,
+        mutate: async (drive) => {
+          drive.setFixtureParents("archive", ["docs"]);
+        },
+      },
+      {
+        label: "archive ancestor move during final destination listing",
+        archiveListAt: 4,
+        mutate: async (drive) => {
+          drive.setFixtureParents("archive", ["docs"]);
+        },
+      },
+    ];
+
+    for (const race of races) {
+      const { drive, session } = fixture();
+      const archived = await session.archiveMarkdown({
+        fileId: fileId("root-file"),
+        expectedRevision: revision("1"),
+      });
+      let archiveLists = 0;
+      let moveCalls = 0;
+      const service = new MarkdownService(
+        portFrom(drive, {
+          listChildren: async (folder) => {
+            const children = await drive.listChildren(folder);
+            if (
+              folder === folderId("archive") &&
+              ++archiveLists === race.archiveListAt
+            ) {
+              await race.mutate(drive, archived.revision);
+            }
+            return children;
+          },
+        }),
+        {
+          rootFolderId: folderId("root"),
+          archiveFolderId: folderId("archive"),
+        },
+        writerFrom({
+          createFile: drive.createFile.bind(drive),
+          updateFile: drive.updateFile.bind(drive),
+          moveFile: async (...args) => {
+            moveCalls += 1;
+            return drive.moveFile(...args);
+          },
+        }),
+      ).openWriteSession();
+
+      await expectCode(
+        () =>
+          service.archiveMarkdown({
+            fileId: fileId("root-file"),
+            expectedRevision: archived.revision,
+          }),
+        "CONFLICT",
+      );
+      expect(moveCalls, race.label).toBe(0);
+    }
+  });
+
   it("does not mutate fake state when an update or archive revision is stale", async () => {
     const { drive, session } = fixture();
     const before = drive.inspect("root-file");

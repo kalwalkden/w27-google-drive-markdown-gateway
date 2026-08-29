@@ -382,7 +382,8 @@ export class MarkdownService {
           node.parentIds[0] !== this.snapshotLeaf(parent).id ||
           canonicalRelativePath(created.segments) !==
             canonicalRelativePath(segments) ||
-          !this.sameChainFacts(created.chain.slice(0, -1), parent.chain)
+          !this.sameChainFacts(created.chain.slice(0, -1), parent.chain) ||
+          !this.sameNodeFacts(result.node, node)
         ) {
           this.throwOutcomeUnknown();
         }
@@ -430,7 +431,7 @@ export class MarkdownService {
             after.chain.slice(0, -1),
             before.chain.slice(0, -1),
           ) ||
-          !this.sameNodeIdentityAndLocation(result.node, node)
+          !this.sameNodeFacts(result.node, node)
         ) {
           this.throwOutcomeUnknown();
         }
@@ -457,7 +458,33 @@ export class MarkdownService {
       );
       if (sourceNode.parentIds[0] === archiveNode.id) {
         this.assertAlreadyArchived(source, archive, initialMatches);
-        return this.toMetadata(sourceNode, source.segments);
+        const recheckedSource = await this.resolveReadFile(context, input);
+        const recheckedSourceNode = this.snapshotLeaf(recheckedSource);
+        const recheckedArchive = await this.resolveArchiveFolder(context);
+        if (
+          !this.sameChainFacts(recheckedSource.chain, source.chain) ||
+          recheckedSourceNode.revision !== input.expectedRevision ||
+          !this.sameChainFacts(recheckedArchive.chain, archive.chain)
+        ) {
+          this.throwConflict();
+        }
+        const recheckedMatches = await this.destinationMatches(
+          context,
+          this.snapshotLeaf(recheckedArchive).id as FolderId,
+          recheckedSourceNode.name,
+        );
+        const finalSource = await this.resolveReadFile(context, input);
+        const finalSourceNode = this.snapshotLeaf(finalSource);
+        const finalArchive = await this.resolveArchiveFolder(context);
+        if (
+          !this.sameChainFacts(finalSource.chain, recheckedSource.chain) ||
+          finalSourceNode.revision !== input.expectedRevision ||
+          !this.sameChainFacts(finalArchive.chain, recheckedArchive.chain)
+        ) {
+          this.throwConflict();
+        }
+        this.assertAlreadyArchived(finalSource, finalArchive, recheckedMatches);
+        return this.toMetadata(finalSourceNode, finalSource.segments);
       }
       this.throwDestinationCollision(initialMatches);
       const sourceParent = source.chain.at(-2);
@@ -514,7 +541,7 @@ export class MarkdownService {
           sourceParent.id as FolderId,
         );
         if (
-          !this.sameNodeIdentityAndLocation(result.node, movedNode) ||
+          !this.sameNodeFacts(result.node, movedNode) ||
           movedNode.name !== sourceNode.name ||
           !movedNode.revision ||
           movedNode.revision === input.expectedRevision ||
@@ -952,7 +979,8 @@ export class MarkdownService {
       sourceNode.parentIds.length !== 1 ||
       sourceNode.parentIds[0] !== archiveNode.id ||
       matches.length !== 1 ||
-      matches[0].id !== sourceNode.id
+      matches[0].id !== sourceNode.id ||
+      !this.sameNodeFacts(matches[0], sourceNode)
     ) {
       this.throwDestinationCollision(matches);
       this.throwConflict();
