@@ -6,6 +6,7 @@
   "privatePluginBuildIdentifier": "example-private-plugin-build",
   "workPlatformRevisionIdentifier": "example-work-platform-revision",
   "principalIdentifier": "example-work-principal",
+  "tenantSessionWriteApproval": "not-observed",
   "operationOutcomes": {
     "list_markdown": "not-run",
     "search_markdown": "not-run",

@@ -18,6 +18,11 @@ endpoint.
   probe, reviewed Terraform plan, and controlled image/config digest gates are
   satisfied. A default-disabled deployment returns `UNSUPPORTED` and ends the
   check without a later mutation.
+- Before the first mutation, observe and record the tenant/session write-approval
+  behavior as exactly one of `observed-approved`, `observed-denied`, or
+  `not-observed`. An unobserved approval prompt is not a passing result and
+  stops the mutation flow. This session behavior is evidence only; it never
+  enables runtime writes or grants Google Drive authority.
 
 ## Fixture and operations
 

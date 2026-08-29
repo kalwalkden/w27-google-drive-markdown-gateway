@@ -71,11 +71,27 @@ describe("ChatGPT Work private package", () => {
 
   it("keeps the evidence template sanitized and non-authoritative", async () => {
     const evidence = JSON.parse(await asset("release-evidence.template.json"));
+    expect(Object.keys(evidence)).toEqual([
+      "schemaVersion",
+      "gatewayImageDigest",
+      "runtimeConfigDigest",
+      "liveCapabilityEvidenceDigest",
+      "privatePluginBuildIdentifier",
+      "workPlatformRevisionIdentifier",
+      "principalIdentifier",
+      "tenantSessionWriteApproval",
+      "operationOutcomes",
+      "archiveVerification",
+      "cleanupStatus",
+      "manualRecovery",
+      "releaseEvidenceRuntimeAuthority",
+    ]);
     expect(evidence).toMatchObject({
       gatewayImageDigest: `sha256:${"0".repeat(64)}`,
       runtimeConfigDigest: `sha256:${"1".repeat(64)}`,
       liveCapabilityEvidenceDigest: `sha256:${"2".repeat(64)}`,
       cleanupStatus: "not-run",
+      tenantSessionWriteApproval: "not-observed",
       releaseEvidenceRuntimeAuthority: false,
     });
     expect(Object.keys(evidence.operationOutcomes)).toEqual([
@@ -88,6 +104,12 @@ describe("ChatGPT Work private package", () => {
       "staleUpdateConflict",
       "archive_markdown",
     ]);
+    const checklist = await asset("live-validation-checklist.md");
+    expect(checklist).toMatch(
+      /`observed-approved`, `observed-denied`, or\s+`not-observed`/u,
+    );
+    expect(checklist).toMatch(/not a passing result/u);
+    expect(checklist).toMatch(/never\s+enables runtime writes/u);
     const committed = await Promise.all([
       asset("private-package.template.json"),
       asset("README.md"),
