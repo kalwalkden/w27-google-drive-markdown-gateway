@@ -152,6 +152,10 @@ describe("GoogleDriveReadAdapter", () => {
       corpora: "user",
       fields: expect.stringContaining("files(id,name,mimeType,parents"),
     });
+    for (const request of [...api.gets, ...api.lists])
+      expect(String(request.fields ?? "")).not.toMatch(
+        /(?:^|,)etag(?:,|$|\))/u,
+      );
     expect(api.lists.some((request) => request.pageToken === "1")).toBe(true);
     drive.invalidateRootContext();
     await drive.listChildren(folderId("root"));
@@ -408,6 +412,28 @@ describe("GoogleDriveReadAdapter", () => {
     await expect(session.listChildren(folderId("docs"))).rejects.toMatchObject({
       name: "DriveReadLimitError",
     });
+  });
+
+  it("enforces one cumulative content-byte budget for a read session", async () => {
+    const api = new FakeDriveApi();
+    api.resources.set("root", folder("root", "root"));
+    api.resources.set("one", file("one", "one.md", ["root"], "four"));
+    api.resources.set("two", file("two", "two.md", ["root"], "four"));
+    api.media.set("one", new TextEncoder().encode("four"));
+    api.media.set("two", new TextEncoder().encode("four"));
+    const session = await adapter(api, { maxReadBytes: 7 }).openReadSession();
+
+    await expect(session.readFile(fileId("one"))).resolves.toMatchObject({
+      content: "four",
+    });
+    await expect(session.readFile(fileId("two"))).rejects.toMatchObject({
+      name: "DriveReadLimitError",
+    });
+    expect(
+      api.gets
+        .filter((request) => request.alt === "media")
+        .map((request) => request.fileId),
+    ).toEqual(["one"]);
   });
 
   it("counts fresh scoped root validation against the metadata budget", async () => {

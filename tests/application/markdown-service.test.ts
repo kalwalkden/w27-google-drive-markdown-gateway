@@ -661,36 +661,32 @@ describe("MarkdownService", () => {
   it("rechecks nested topology before dispatch", async () => {
     const { drive } = fixture();
     let createCalls = 0;
+    let preDispatchLists = 0;
     const raw: RawDriveWritePort = {
       createFile: async (parent, name, content) => {
         createCalls += 1;
+        expect(preDispatchLists).toBe(4);
         return drive.createFile(parent, name, content);
       },
       updateFile: drive.updateFile.bind(drive),
       moveFile: drive.moveFile.bind(drive),
     };
-    let listCalls = 0;
     const service = new MarkdownService(
       portFrom(drive, {
         listChildren: async (folder) => {
-          const children = await drive.listChildren(folder);
-          if (folder === folderId("docs") && ++listCalls === 2) {
-            drive.setFixtureParents("docs", ["archive"]);
-          }
-          return children;
+          preDispatchLists += 1;
+          return drive.listChildren(folder);
         },
       }),
       { rootFolderId: folderId("root"), archiveFolderId: folderId("archive") },
       writerFrom(raw),
     );
-    await expectCode(
-      () =>
-        service
-          .openWriteSession()
-          .createMarkdown({ path: "docs/new.md", content: "x" }),
-      "CONFLICT",
-    );
-    expect(createCalls).toBe(0);
+    await expect(
+      service
+        .openWriteSession()
+        .createMarkdown({ path: "docs/new.md", content: "x" }),
+    ).resolves.toMatchObject({ relativePath: "docs/new.md" });
+    expect(createCalls).toBe(1);
   });
 
   it("rejects unsafe local inputs before any port call", async () => {
@@ -1089,6 +1085,83 @@ describe("MarkdownService", () => {
     await expect(
       service.searchMarkdown({ query: "root" }),
     ).resolves.toMatchObject([{ relativePath: "root-file.md" }]);
+  });
+
+  it("returns oversized filename matches without reading their content", async () => {
+    const drive = new InMemoryDrivePort();
+    drive.addFixture({ id: "root", name: "root", kind: "folder" });
+    drive.addFixture({
+      id: "archive",
+      name: "archive",
+      kind: "folder",
+      parentIds: ["root"],
+    });
+    drive.addFixture({
+      id: "large",
+      name: "query.md",
+      kind: "file",
+      parentIds: ["root"],
+      content: "oversized",
+    });
+    let contentReads = 0;
+    const service = new MarkdownService(
+      portFrom(drive, {
+        readFile: async (id) => {
+          contentReads += 1;
+          return drive.readFile(id);
+        },
+      }),
+      {
+        rootFolderId: folderId("root"),
+        archiveFolderId: folderId("archive"),
+        maxMarkdownBytes: 4,
+      },
+    );
+
+    await expect(service.searchMarkdown({ query: "query" })).resolves.toEqual([
+      expect.objectContaining({ relativePath: "query.md" }),
+    ]);
+    expect(contentReads).toBe(0);
+  });
+
+  it("post-validates every content search read before applying the result limit", async () => {
+    const drive = new InMemoryDrivePort();
+    drive.addFixture({ id: "root", name: "root", kind: "folder" });
+    drive.addFixture({
+      id: "archive",
+      name: "archive",
+      kind: "folder",
+      parentIds: ["root"],
+    });
+    drive.addFixture({
+      id: "first",
+      name: "first.md",
+      kind: "file",
+      parentIds: ["root"],
+      content: "needle first",
+    });
+    drive.addFixture({
+      id: "second",
+      name: "second.md",
+      kind: "file",
+      parentIds: ["root"],
+      content: "needle second",
+    });
+    const service = new MarkdownService(
+      portFrom(drive, {
+        readFile: async (id) => {
+          const read = await drive.readFile(id);
+          if (id === fileId("second")) drive.setFixtureParents("second", []);
+          return read;
+        },
+      }),
+      { rootFolderId: folderId("root"), archiveFolderId: folderId("archive") },
+    );
+
+    await expectCode(
+      () => service.searchMarkdown({ query: "needle", limit: 1 }),
+      "CONFLICT",
+    );
   });
 
   it("does not expose a content-search excerpt when media facts race", async () => {

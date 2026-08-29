@@ -67,6 +67,7 @@ export class InMemoryDrivePort implements DriveReadPort, RawDriveWritePort {
     let traversed = 0;
     let metadata = 0;
     let contentReads = 0;
+    let contentBytes = 0;
     const maxTraversalNodes = this.readConfig.maxTraversalNodes ?? 10_000;
     const maxMetadataChecks = this.readConfig.maxMetadataChecks ?? 100_000;
     const maxContentSearchFiles =
@@ -87,8 +88,14 @@ export class InMemoryDrivePort implements DriveReadPort, RawDriveWritePort {
         if (++contentReads > maxContentSearchFiles)
           throw new DriveReadLimitError();
         const read = await this.readFile(id);
-        if (read && utf8ByteSize(read.content) > maxMarkdownBytes) {
-          throw new DriveReadLimitError();
+        if (read) {
+          const bytes = utf8ByteSize(read.content);
+          if (
+            bytes > maxMarkdownBytes ||
+            contentBytes + bytes > maxMarkdownBytes
+          )
+            throw new DriveReadLimitError();
+          contentBytes += bytes;
         }
         return read;
       },

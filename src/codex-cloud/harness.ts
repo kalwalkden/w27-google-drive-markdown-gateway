@@ -8,6 +8,8 @@ export const confirmation = "W27_CODEX_CLOUD_TEST_ONLY";
 const gatewayFailures = {
   UNAUTHENTICATED: [401, 6, "Authentication failed."],
   UNSUPPORTED: [503, 7, "Operation is unavailable."],
+  INVALID_PATH: [400, 7, "Path is invalid."],
+  AMBIGUOUS_PATH: [409, 7, "Markdown path is ambiguous."],
   CONFLICT: [409, 8, "Markdown revision conflict."],
   OUTCOME_UNKNOWN: [
     503,
@@ -361,6 +363,12 @@ const outcomeFor = (
     : "failed",
   code: record.error,
 });
+const isDuplicateRefusal = (
+  record: CliRecord,
+): record is Readonly<{
+  ok: false;
+  error: "INVALID_PATH";
+}> => !record.ok && record.error === "INVALID_PATH";
 const manualRecovery = (
   runReference: string,
 ): HarnessEvidence["manualRecovery"] => ({
@@ -523,7 +531,10 @@ export async function runHarness(
       contentFile,
     ]);
     uncertainMutation = false;
-    if (duplicate.ok || duplicate.error !== "CONFLICT") {
+    const duplicateCode = isDuplicateRefusal(duplicate)
+      ? duplicate.error
+      : undefined;
+    if (!duplicateCode) {
       outcomes.duplicate_create = duplicate.ok
         ? { outcome: "failed", code: "MISMATCH" }
         : outcomeFor(duplicate);
@@ -531,7 +542,10 @@ export async function runHarness(
       recovery = manualRecovery(runIdentifier);
       stop();
     }
-    outcomes.duplicate_create = { outcome: "passed", code: "CONFLICT" };
+    outcomes.duplicate_create = {
+      outcome: "passed",
+      code: duplicateCode as "INVALID_PATH",
+    };
     duplicateRefusal = "passed";
     const duplicateRead = await call("read_after_duplicate", "read_markdown", [
       "read",
@@ -727,6 +741,8 @@ const outcomeSchema = z
       "NOT_ATTEMPTED",
       "UNAUTHENTICATED",
       "UNSUPPORTED",
+      "INVALID_PATH",
+      "AMBIGUOUS_PATH",
       "CONFLICT",
       "OUTCOME_UNKNOWN",
       "USAGE",

@@ -239,13 +239,15 @@ export class MarkdownService {
       const matchedSnapshots: ReadSnapshot[] = [];
       for (const candidate of candidates) {
         const node = this.snapshotLeaf(candidate);
+        const nameMatch = node.name.toLowerCase().includes(needle);
         if (node.size === undefined || node.size > this.maxMarkdownBytes) {
-          if (!node.name.toLowerCase().includes(needle))
-            this.throwResultLimit();
+          if (!nameMatch) this.throwResultLimit();
+          matches.push(this.toMetadata(node, candidate.segments));
+          matchedSnapshots.push(candidate);
           continue;
         }
         let excerpt: string | undefined;
-        if (!node.name.toLowerCase().includes(needle)) {
+        if (!nameMatch) {
           if (++context.contentSearchFiles > this.maxContentSearchFiles)
             this.throwResultLimit();
           let read: DriveRead | undefined;
@@ -273,6 +275,9 @@ export class MarkdownService {
           if (utf8ByteSize(read.content) !== node.size) {
             this.throwResultLimit();
           }
+          // A media read can race any ancestor, including when it is not a
+          // match or the eventual match falls beyond the caller result limit.
+          await this.assertStableSnapshot(context, candidate);
           const index = read.content.toLowerCase().indexOf(needle);
           if (index < 0) continue;
           excerpt = this.excerptAround(read.content, index, input.query.length);
@@ -350,14 +355,8 @@ export class MarkdownService {
       await this.assertDestinationVacant(context, parent, leaf);
       const recheckedParent = await this.recheckSnapshot(context, parent);
       await this.assertDestinationVacant(context, recheckedParent, leaf);
-      // Listing a folder proves name vacancy but cannot bind its own mutable
-      // ancestry, so take one final topology snapshot immediately before send.
-      const dispatchParent = await this.recheckSnapshot(
-        context,
-        recheckedParent,
-      );
       const result = await this.dispatchCreate(
-        this.snapshotLeaf(dispatchParent).id as FolderId,
+        this.snapshotLeaf(recheckedParent).id as FolderId,
         leaf,
         input.content,
       );

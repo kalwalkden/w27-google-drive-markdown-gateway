@@ -1,8 +1,18 @@
 # Gateway Operations Runbook
 
-This is an operator-only procedure for the read-only Google Drive Markdown gateway. There is no
+This is an operator-only procedure for the Google Drive Markdown gateway. Writes are disabled by default:
+an absent or false deployment `write.enabled` keeps the service read-only. Production create, update, and
+archive are available only in a reviewed write-enabled deployment, after the external release gates in the
+feature runbook have been completed by operators. A write-enabled Terraform plan requires
+`enable_write = true` and `acknowledge_write_risk = true`. There is no
 live drill in repository tests: they only read this document and its synthetic record template and
 do not perform a rotation, recovery, provider call, deployment, monitoring query, or live action.
+
+Those external release gates require independent review, a marked dedicated root/archive and
+server-identity review, provider capability evidence, a reviewed write-enabled Terraform plan, a
+controlled deployment, and separate Work and Codex validation flows. The detailed order is in
+[`write-gate-and-client-validation.md`](./write-gate-and-client-validation.md); evidence informs the
+operator release decision but never grants runtime authority.
 
 Never put credential values, document bodies, authorization headers, provider responses, file
 names, paths, identifiers, revision values, URLs, error messages, stacks, or secret references in
@@ -13,10 +23,13 @@ separate, access-controlled, sanitized operator artifact; use the checked-in
 schema-shaped template. It is not live evidence, a credential inventory, deployment acknowledgement,
 or gateway write authority.
 
-No procedure here enables a write session, nested mutation, archive route, Drive delete, or Drive
-trash operation. The current read surface is bounded and root-confined, including nested and
-recursive reads. `/healthz` proves process composition only; it does not prove Drive readiness or
-recovery.
+No procedure here itself enables a write session, Drive delete, or Drive trash operation. The
+gateway supports bounded, root-confined nested operations when production writes are explicitly
+enabled: create in an existing verified folder, revision-checked update, and revision-checked
+archive into the configured archive folder. Archive moves one file and never deletes or trashes it.
+Every mutation is gated by the external release gates and must reconcile `CONFLICT`, timeout, or
+`OUTCOME_UNKNOWN` before another mutation. `/healthz` proves process composition only; it does not
+prove Drive readiness or recovery.
 
 ## Roles, authorization, and evidence
 
@@ -89,8 +102,8 @@ For `my-drive-refresh-token`:
 1. The Drive and deployment administrators update the existing OAuth credential object through
    the approved Secret Manager process, without storing the object or its reference in evidence.
 2. Restart to a reviewed, controlled Cloud Run revision so the replacement mount is observed.
-3. Validate only the restricted, read-only controlled operation permitted by the live-harness
-   policy. If reauthorization cannot be completed, treat the condition as a Drive outage.
+3. Validate only the controlled operation permitted by the reviewed release policy. If
+   reauthorization cannot be completed, treat the condition as a Drive outage.
 4. Revoke the former refresh token at the OAuth provider only after replacement succeeds and
    rollback readiness is no longer required.
 
@@ -161,25 +174,27 @@ template. Confirm that it remains a root-confined Markdown file (the current rea
 bounded nested and recursive reads). Select a known-good version and restore it through Drive
 version history.
 
-Never delete or trash versions, replace content through an unguarded gateway write, recover to a
-nested location, or use unavailable archive functionality. The current runtime has no write
-session, and archive is disabled. The authorized operator verifies restricted post-recovery
-metadata/content and writes only an opaque target reference, a non-content integrity/result
-indicator, and outcome to the access-controlled external record. Escalate wrong-parent, missing
-version, conflict, access, or uncertain outcomes rather than guessing or broadening access.
+Never delete or trash versions, replace content through an unguarded gateway write, or recover to
+an unverified location. A production-enabled gateway mutation still requires its exact current
+revision and the external release gates; archive is a revision-checked move only. The authorized
+operator verifies restricted post-recovery metadata/content and writes only an opaque target
+reference, a non-content integrity/result indicator, and outcome to the access-controlled external
+record. Escalate wrong-parent, missing version, conflict, access, or uncertain outcomes rather than
+guessing or broadening access.
 
 ## Outage and timeout recovery
 
 First distinguish process health, authentication failure, Drive dependency failure, and caller
 deadline. A timeout can leave an already-dispatched provider operation unresolved: do not retry or
-replay a mutation. Writes, nested mutations, and archive remain unavailable. After recovery, use
-only the bounded, root-confined nested/recursive read surface; involve the Drive administrator for
-provider or Google-auth conditions.
+replay a mutation. In a production-enabled deployment, reread and reconcile before any later nested
+create, update, or archive; in the default configuration writes remain unavailable. After recovery,
+use the bounded, root-confined nested operations only within their configured authority; involve the
+Drive administrator for provider or Google-auth conditions.
 
 ## Cleanup and retention
 
 Retain Secret Manager versions, Cloud Run revisions, Drive data, external sanitized evidence, and
 Terraform state according to approved retention policies. Do not automatically delete any of them.
 The live-harness manual cleanup may move only the exact marked disposable file to its direct-child
-archive; it never deletes or trashes a file. This exception is a harness cleanup constraint, not a
-production archive capability.
+archive; it never deletes or trashes a file. This mirrors, but does not authorize, the
+production archive capability; external release gates remain required before it is enabled.

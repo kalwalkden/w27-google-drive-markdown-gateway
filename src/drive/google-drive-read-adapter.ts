@@ -34,7 +34,7 @@ export {
 const folderMimeType = "application/vnd.google-apps.folder";
 const shortcutMimeType = "application/vnd.google-apps.shortcut";
 const metadataFields =
-  "id,name,mimeType,parents,modifiedTime,size,trashed,driveId,etag,shortcutDetails";
+  "id,name,mimeType,parents,modifiedTime,size,trashed,driveId,shortcutDetails";
 const defaultMaxReadBytes = 1_000_000;
 const defaultMaxTraversalNodes = 1_000;
 const defaultMaxPages = 100;
@@ -69,7 +69,6 @@ interface DriveFileResource {
   readonly size?: unknown;
   readonly trashed?: unknown;
   readonly driveId?: unknown;
-  readonly etag?: unknown;
 }
 
 export class GoogleDriveReadAdapter implements DriveReadPort {
@@ -109,6 +108,7 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
     let nodes = 0;
     let metadata = 0;
     let contentReads = 0;
+    let contentBytes = 0;
     const consumeMetadata = (): void => {
       if (++metadata > this.maxMetadataChecks) throw new DriveReadLimitError();
     };
@@ -203,6 +203,11 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
         ) {
           throw new GoogleDriveProviderError("malformed", "read-media");
         }
+        if (contentBytes + node.size > this.maxReadBytes)
+          throw new DriveReadLimitError();
+        // Reserve from the verified metadata before downloading so one scope
+        // cannot exceed its aggregate media budget through multiple files.
+        contentBytes += node.size;
         const response = await this.callGet(
           {
             fileId: id,
@@ -661,9 +666,7 @@ function normalizeNode(
       kind: "folder",
       parentIds,
       modifiedTime,
-      revision: isEntityTag(rawEtag ?? value.etag)
-        ? revision(rawEtag ?? (value.etag as string))
-        : undefined,
+      revision: isEntityTag(rawEtag) ? revision(rawEtag) : undefined,
       mimeType,
     };
   }
@@ -686,9 +689,7 @@ function normalizeNode(
     modifiedTime,
     // A file never receives a synthetic revision; list results are refreshed via
     // metadata GET so every visible mutable document carries its raw HTTP ETag.
-    revision: isEntityTag(rawEtag ?? value.etag)
-      ? revision(rawEtag ?? (value.etag as string))
-      : undefined,
+    revision: isEntityTag(rawEtag) ? revision(rawEtag) : undefined,
     size,
     mimeType,
   };

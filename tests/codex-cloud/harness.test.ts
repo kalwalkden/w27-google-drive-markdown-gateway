@@ -45,6 +45,8 @@ const config = {
 } as const;
 type Mode =
   | "success"
+  | "duplicate-invalid-path"
+  | "duplicate-ambiguous-path"
   | "create-unsupported"
   | "create-unknown"
   | "create-transport"
@@ -69,11 +71,19 @@ type Mode =
   | "archive-protocol";
 const gatewayFailure = (
   operation: string,
-  code: "UNAUTHENTICATED" | "UNSUPPORTED" | "CONFLICT" | "OUTCOME_UNKNOWN",
+  code:
+    | "UNAUTHENTICATED"
+    | "UNSUPPORTED"
+    | "INVALID_PATH"
+    | "AMBIGUOUS_PATH"
+    | "CONFLICT"
+    | "OUTCOME_UNKNOWN",
 ) => {
   const values = {
     UNAUTHENTICATED: [401, 6, "Authentication failed."],
     UNSUPPORTED: [503, 7, "Operation is unavailable."],
+    INVALID_PATH: [400, 7, "Path is invalid."],
+    AMBIGUOUS_PATH: [409, 7, "Markdown path is ambiguous."],
     CONFLICT: [409, 8, "Markdown revision conflict."],
     OUTCOME_UNKNOWN: [
       503,
@@ -139,6 +149,10 @@ function fakeRunner(mode: Mode = "success"): {
           if (creates === 1 && mode === "create-protocol")
             return { exitCode: 0, stdout: "not-json" };
           if (creates === 2) {
+            if (mode === "duplicate-invalid-path")
+              return gatewayFailure("create_markdown", "INVALID_PATH");
+            if (mode === "duplicate-ambiguous-path")
+              return gatewayFailure("create_markdown", "AMBIGUOUS_PATH");
             if (mode === "duplicate-unknown")
               return gatewayFailure("create_markdown", "OUTCOME_UNKNOWN");
             if (mode === "duplicate-transport")
@@ -154,7 +168,7 @@ function fakeRunner(mode: Mode = "success"): {
               };
             if (mode === "duplicate-protocol")
               return { exitCode: 0, stdout: "not-json" };
-            return gatewayFailure("create_markdown", "CONFLICT");
+            return gatewayFailure("create_markdown", "INVALID_PATH");
           }
         }
         if (command === "update") {
@@ -407,6 +421,37 @@ describe("Codex cloud harness", () => {
       "search",
       "create",
     ]);
+  });
+  it("accepts the single-destination duplicate refusal after proving the original file is unchanged", async () => {
+    const fake = fakeRunner("duplicate-invalid-path");
+    const result = await runHarness(
+      config,
+      confirmation,
+      fake.runner,
+      dependencies,
+    );
+    expect(result.overall).toBe("passed");
+    expect(result.operationOutcomes.duplicate_create).toEqual({
+      outcome: "passed",
+      code: "INVALID_PATH",
+    });
+    expect(fake.calls.map((args) => args[2])).toContain("read");
+  });
+
+  it("stops for manual recovery when duplicate refusal reveals ambiguous topology", async () => {
+    const fake = fakeRunner("duplicate-ambiguous-path");
+    const result = await runHarness(
+      config,
+      confirmation,
+      fake.runner,
+      dependencies,
+    );
+    expect(result.overall).toBe("failed");
+    expect(result.operationOutcomes.duplicate_create).toEqual({
+      outcome: "failed",
+      code: "AMBIGUOUS_PATH",
+    });
+    expect(result.manualRecovery).toMatchObject({ required: true });
   });
   it.each([
     ["create-transport", "create"],
