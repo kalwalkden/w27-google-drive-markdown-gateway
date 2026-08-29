@@ -4,6 +4,7 @@ import {
   assertWellFormedUtf16,
   fileId,
   folderId,
+  isWellFormedUtf16,
   revision,
   type FileId,
   type FolderId,
@@ -52,6 +53,7 @@ export class GoogleDriveWriteAdapter implements RawDriveWritePort {
     name: string,
     content: string,
   ): Promise<CreateWriteResult> {
+    if (!isWellFormedOpaqueId(parentId)) return { outcome: "unsupported" };
     try {
       assertWellFormedUtf16(content);
     } catch {
@@ -85,7 +87,8 @@ export class GoogleDriveWriteAdapter implements RawDriveWritePort {
     expectedRevision: Revision,
     content: string,
   ): Promise<ConditionalWriteResult> {
-    if (!isEntityTag(expectedRevision)) return { outcome: "unsupported" };
+    if (!isWellFormedOpaqueId(id) || !isEntityTag(expectedRevision))
+      return { outcome: "unsupported" };
     try {
       assertWellFormedUtf16(content);
     } catch {
@@ -113,7 +116,13 @@ export class GoogleDriveWriteAdapter implements RawDriveWritePort {
     sourceFolderId: FolderId,
     destinationFolderId: FolderId,
   ): Promise<ConditionalWriteResult> {
-    if (!isEntityTag(expectedRevision)) return { outcome: "unsupported" };
+    if (
+      !isWellFormedOpaqueId(id) ||
+      !isWellFormedOpaqueId(sourceFolderId) ||
+      !isWellFormedOpaqueId(destinationFolderId) ||
+      !isEntityTag(expectedRevision)
+    )
+      return { outcome: "unsupported" };
     const response = await this.send({
       method: "PATCH",
       url: driveUrl(`/drive/v3/files/${encodeURIComponent(id)}`, {
@@ -212,7 +221,7 @@ function responseNode(
     return undefined;
   }
   if (!isRecord(value) || value.trashed !== false) return undefined;
-  const id = nonempty(value.id);
+  const id = nonemptyWellFormed(value.id);
   const name = nonempty(value.name);
   const mimeType = nonempty(value.mimeType);
   const modifiedTime = nonempty(value.modifiedTime);
@@ -224,7 +233,7 @@ function responseNode(
     !modifiedTime ||
     Number.isNaN(Date.parse(modifiedTime)) ||
     !Array.isArray(value.parents) ||
-    !value.parents.every((parent) => nonempty(parent)) ||
+    !value.parents.every((parent) => nonemptyWellFormed(parent)) ||
     typeof size !== "string" ||
     !/^\d+$/u.test(size) ||
     !Number.isSafeInteger(Number(size))
@@ -244,6 +253,17 @@ function responseNode(
 
 function nonempty(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function nonemptyWellFormed(value: unknown): string | undefined {
+  const result = nonempty(value);
+  return result && isWellFormedUtf16(result) ? result : undefined;
+}
+
+function isWellFormedOpaqueId(value: unknown): value is string {
+  return (
+    typeof value === "string" && value.length > 0 && isWellFormedUtf16(value)
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

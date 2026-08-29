@@ -1,8 +1,8 @@
 import type { Express } from "express";
 
 import { MarkdownService } from "../application/markdown-service.js";
-import { createPrincipalVerifier } from "../auth/principal-verifier.js";
 import type { PrincipalVerifier } from "../auth/principal.js";
+import { createPrincipalVerifier } from "../auth/principal-verifier.js";
 import type { ServiceConfig } from "../config/service-config.js";
 import {
   createGoogleDriveReadAdapter,
@@ -14,8 +14,8 @@ import {
 } from "../http/json-api.js";
 import {
   loadOAuthCredentials,
-  parseRuntimeConfigJson,
   type OAuthSecretReader,
+  parseRuntimeConfigJson,
   RuntimeConfigurationError,
 } from "./config.js";
 
@@ -115,6 +115,7 @@ export async function composeRuntime(
     maxMarkdownBytes: config.drive.maxMarkdownBytes,
     defaultSearchLimit: Math.min(20, config.http.maxResultItems),
     maxSearchLimit: config.http.maxResultItems,
+    maxListResults: config.drive.maxResults,
   });
   const app = (dependencies.createApiApp ?? createJsonApiApp)({
     config,

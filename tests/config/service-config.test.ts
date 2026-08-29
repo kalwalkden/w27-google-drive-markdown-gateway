@@ -95,6 +95,19 @@ describe("service configuration", () => {
     ).toThrow();
   });
 
+  it.each([
+    ["rootFolderId", "\ud800"],
+    ["archiveFolderId", "\udc00"],
+    ["sharedDriveId", "shared-\ud800"],
+  ])("rejects malformed Unicode Drive configuration ID %s", (key, value) => {
+    expect(() =>
+      parseServiceConfig({
+        ...validConfig(),
+        drive: { ...validConfig().drive, [key]: value },
+      }),
+    ).toThrow();
+  });
+
   it("rejects unsafe issuer, JWKS, algorithm, and secret reference values", () => {
     for (const issuer of [
       "http://issuer.invalid",

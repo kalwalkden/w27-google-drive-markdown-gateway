@@ -2,7 +2,11 @@ import { isAbsolute } from "node:path";
 
 import { z } from "zod";
 
-import { type FolderId, folderId } from "../domain/markdown.js";
+import {
+  type FolderId,
+  folderId,
+  isWellFormedUtf16,
+} from "../domain/markdown.js";
 
 const allowedJwtAlgorithms = [
   "RS256",
@@ -25,7 +29,14 @@ const folderIdSchema = z
   .string()
   .trim()
   .min(1)
+  .refine(isWellFormedUtf16, "folder ID must be well-formed Unicode")
   .transform((value) => folderId(value));
+
+const opaqueIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine(isWellFormedUtf16, "identifier must be well-formed Unicode");
 
 const secretFileReferenceSchema = z
   .string()
@@ -85,7 +96,7 @@ const driveSchema = z
         authMode: z.literal("shared-drive-adc"),
         rootFolderId: folderIdSchema,
         archiveFolderId: folderIdSchema,
-        sharedDriveId: z.string().trim().min(1),
+        sharedDriveId: opaqueIdSchema,
         maxMarkdownBytes: boundedPositiveInteger(1, 10_000_000),
         maxTraversalNodes: boundedPositiveInteger(1, 10_000),
         maxPages: boundedPositiveInteger(1, 100),

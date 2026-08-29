@@ -163,4 +163,34 @@ describe("GoogleDriveWriteAdapter", () => {
     ).resolves.toEqual({ outcome: "unsupported" });
     expect(http.requests).toHaveLength(0);
   });
+
+  it("refuses malformed opaque request and response IDs before dispatch or exposure", async () => {
+    const http = new CapturingHttp();
+    const adapter = new GoogleDriveWriteAdapter(http);
+    await expect(
+      adapter.createFile(folderId("\ud800"), "new.md", "hey"),
+    ).resolves.toEqual({ outcome: "unsupported" });
+    await expect(
+      adapter.updateFile(fileId("\udc00"), revision('"old"'), "hey"),
+    ).resolves.toEqual({ outcome: "unsupported" });
+    await expect(
+      adapter.moveFile(
+        fileId("file"),
+        revision('"old"'),
+        folderId("\ud800"),
+        folderId("archive"),
+      ),
+    ).resolves.toEqual({ outcome: "unsupported" });
+    expect(http.requests).toHaveLength(0);
+
+    http.response = {
+      ...http.response,
+      body: new TextEncoder().encode(
+        JSON.stringify({ ...metadata, id: "\ud800", parents: ["\udc00"] }),
+      ),
+    };
+    await expect(
+      adapter.createFile(folderId("docs"), "new.md", "hey"),
+    ).resolves.toEqual({ outcome: "unsupported" });
+  });
 });

@@ -167,7 +167,9 @@ export function parseRelativePath(path: string): readonly string[] {
   return segments;
 }
 
-function isWellFormedUtf16(value: string): boolean {
+/** True only for strings that can be represented as well-formed Unicode text. */
+export function isWellFormedUtf16(value: unknown): value is string {
+  if (typeof value !== "string") return false;
   for (let index = 0; index < value.length; index += 1) {
     const unit = value.charCodeAt(index);
     if (unit >= 0xd800 && unit <= 0xdbff) {

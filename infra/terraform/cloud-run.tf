@@ -76,9 +76,8 @@ resource "google_cloud_run_v2_service" "gateway" {
     containers {
       image = var.container_image
 
-      env {
-        name  = "PORT"
-        value = "8080"
+      ports {
+        container_port = 8080
       }
 
       env {

@@ -1,20 +1,21 @@
 import {
-  fileId,
-  folderId,
-  revision,
-  utf8ByteSize,
   type FileId,
   type FolderId,
+  fileId,
+  folderId,
   type Revision,
+  revision,
+  utf8ByteSize,
 } from "../domain/markdown.js";
 import type {
   ConditionalWriteResult,
   CreateWriteResult,
+  DriveListOptions,
   DriveNode,
-  DriveReadPort,
   DriveRead,
-  RawDriveWritePort,
+  DriveReadPort,
   DriveSearchHit,
+  RawDriveWritePort,
 } from "./drive-port.js";
 
 export interface InMemoryNodeFixture {
@@ -77,10 +78,17 @@ export class InMemoryDrivePort implements DriveReadPort, RawDriveWritePort {
     return node ? this.snapshot(node) : undefined;
   }
 
-  async listChildren(folder: FolderId): Promise<readonly DriveNode[]> {
-    return [...this.nodes.values()]
-      .filter((node) => node.parentIds.includes(folder))
-      .map((node) => this.snapshot(node));
+  async listChildren(
+    folder: FolderId,
+    options?: DriveListOptions,
+  ): Promise<readonly DriveNode[]> {
+    const limit = options?.limit;
+    const children = [...this.nodes.values()].filter((node) =>
+      node.parentIds.includes(folder),
+    );
+    return (limit === undefined ? children : children.slice(0, limit)).map(
+      (node) => this.snapshot(node),
+    );
   }
 
   async listDescendants(

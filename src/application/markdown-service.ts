@@ -1,25 +1,26 @@
 import {
-  canonicalRelativePath,
   type ArchiveMarkdownInput,
   type ArchiveMarkdownResult,
   type CreateMarkdownInput,
   type CreateMarkdownResult,
+  canonicalRelativePath,
   type FileId,
   type FileLocator,
   type FolderId,
   isMarkdownName,
-  MarkdownGatewayError,
-  type MarkdownFileMetadata,
+  isWellFormedUtf16,
   type ListMarkdownInput,
   type ListMarkdownResult,
+  type MarkdownFileMetadata,
+  MarkdownGatewayError,
   parseRelativePath,
-  requireContentWithinLimit,
-  requireMarkdownPath,
-  type Revision,
-  type SearchMarkdownInput,
-  type SearchMarkdownResults,
   type ReadMarkdownInput,
   type ReadMarkdownResult,
+  type Revision,
+  requireContentWithinLimit,
+  requireMarkdownPath,
+  type SearchMarkdownInput,
+  type SearchMarkdownResults,
   type UpdateMarkdownInput,
   type UpdateMarkdownResult,
   utf8ByteSize,
@@ -32,10 +33,10 @@ import type {
 } from "../drive/drive-port.js";
 import {
   DisabledDriveWritePort,
+  type GuardedDriveWriter,
   guardedCreateFile,
   guardedUpdateFile,
   isGuardedDriveWriter,
-  type GuardedDriveWriter,
 } from "../drive/guarded-drive-write-port.js";
 import type { WriteLease } from "../write-gate/gate.js";
 
@@ -43,6 +44,7 @@ const DEFAULT_MAX_BYTES = 1_000_000;
 const DEFAULT_SEARCH_LIMIT = 20;
 const MAX_SEARCH_LIMIT = 100;
 const ABSOLUTE_MAX_SEARCH_LIMIT = 1_000;
+const DEFAULT_MAX_LIST_RESULTS = ABSOLUTE_MAX_SEARCH_LIMIT;
 
 export interface MarkdownServiceConfig {
   readonly rootFolderId: FolderId;
@@ -51,6 +53,8 @@ export interface MarkdownServiceConfig {
   readonly defaultRecursive?: boolean;
   readonly defaultSearchLimit?: number;
   readonly maxSearchLimit?: number;
+  /** Maximum direct-root entries enumerated for one list request. */
+  readonly maxListResults?: number;
 }
 
 interface ResolvedNode {
@@ -69,6 +73,7 @@ export class MarkdownService {
   private readonly defaultRecursive: boolean;
   private readonly defaultSearchLimit: number;
   private readonly maxSearchLimit: number;
+  private readonly maxListResults: number;
 
   constructor(
     private readonly port: DriveReadPort,
@@ -82,8 +87,8 @@ export class MarkdownService {
       );
     }
     if (
-      !config.rootFolderId ||
-      !config.archiveFolderId ||
+      !this.isWellFormedCallerId(config.rootFolderId) ||
+      !this.isWellFormedCallerId(config.archiveFolderId) ||
       config.rootFolderId === config.archiveFolderId
     ) {
       throw new MarkdownGatewayError(
@@ -95,14 +100,18 @@ export class MarkdownService {
     this.defaultRecursive = config.defaultRecursive ?? false;
     this.defaultSearchLimit = config.defaultSearchLimit ?? DEFAULT_SEARCH_LIMIT;
     this.maxSearchLimit = config.maxSearchLimit ?? MAX_SEARCH_LIMIT;
+    this.maxListResults = config.maxListResults ?? DEFAULT_MAX_LIST_RESULTS;
     if (
       !Number.isSafeInteger(this.maxMarkdownBytes) ||
       this.maxMarkdownBytes < 0 ||
       !Number.isSafeInteger(this.defaultSearchLimit) ||
       !Number.isSafeInteger(this.maxSearchLimit) ||
+      !Number.isSafeInteger(this.maxListResults) ||
       this.defaultSearchLimit < 1 ||
       this.maxSearchLimit < this.defaultSearchLimit ||
       this.maxSearchLimit > ABSOLUTE_MAX_SEARCH_LIMIT ||
+      this.maxListResults < 1 ||
+      this.maxListResults > ABSOLUTE_MAX_SEARCH_LIMIT ||
       typeof this.defaultRecursive !== "boolean"
     ) {
       throw new MarkdownGatewayError(
@@ -134,10 +143,13 @@ export class MarkdownService {
       );
     }
     this.requireDirectRootRead(input.path, recursive);
-    const candidates = await this.port.listChildren(this.config.rootFolderId);
+    const candidates = await this.port.listChildren(this.config.rootFolderId, {
+      limit: this.maxListResults,
+    });
     const result: MarkdownFileMetadata[] = [];
     const paths = new Set<string>();
     for (const candidate of candidates) {
+      if (result.length >= this.maxListResults) break;
       const metadata = await this.safeMetadata(candidate);
       if (metadata && this.isDirectlyBelow(metadata.relativePath, [])) {
         this.assertUniquePath(paths, metadata.relativePath);
@@ -295,6 +307,8 @@ export class MarkdownService {
     input: ArchiveMarkdownInput,
     lease: WriteLease,
   ): Promise<ArchiveMarkdownResult> {
+    if ("fileId" in input) this.assertWellFormedCallerId(input.fileId);
+    this.requireExpectedRevision(input.expectedRevision);
     void input;
     void lease;
     // A file ETag cannot bind the archive folder's parent chain.
@@ -395,6 +409,7 @@ export class MarkdownService {
     id: FileId | FolderId,
     expectedKind: "file" | "folder",
   ): Promise<ResolvedNode> {
+    this.assertWellFormedCallerId(id);
     const seen = new Set<string>();
     const segments: string[] = [];
     let current = await this.port.getNode(id);
@@ -408,6 +423,7 @@ export class MarkdownService {
     }
     const leaf = current;
     while (current.id !== this.config.rootFolderId) {
+      this.assertWellFormedNodeIds(current);
       if (seen.has(current.id))
         throw new MarkdownGatewayError(
           "OUTSIDE_ROOT",
@@ -439,6 +455,7 @@ export class MarkdownService {
         );
       current = parent;
     }
+    this.assertWellFormedNodeIds(current);
     if (current.kind !== "folder" || current.parentIds.length > 1) {
       throw new MarkdownGatewayError(
         "OUTSIDE_ROOT",
@@ -462,6 +479,7 @@ export class MarkdownService {
         "Configured root is not a safe folder.",
       );
     }
+    this.assertWellFormedNodeIds(root);
     this.assertSafeDriveName(root.name);
     return root;
   }
@@ -525,6 +543,7 @@ export class MarkdownService {
   }
 
   private assertRegularMarkdown(node: DriveNode): void {
+    this.assertWellFormedNodeIds(node);
     if (
       typeof node.id !== "string" ||
       node.id.length === 0 ||
@@ -654,10 +673,41 @@ export class MarkdownService {
   }
 
   private requireExpectedRevision(value: Revision): void {
-    if (typeof value !== "string" || value.length === 0) {
+    if (
+      typeof value !== "string" ||
+      value.length === 0 ||
+      !isWellFormedUtf16(value)
+    ) {
       throw new MarkdownGatewayError(
         "CONFLICT",
         "An expected revision is required.",
+      );
+    }
+  }
+
+  private isWellFormedCallerId(value: unknown): value is string {
+    return (
+      typeof value === "string" && value.length > 0 && isWellFormedUtf16(value)
+    );
+  }
+
+  private assertWellFormedCallerId(value: unknown): asserts value is string {
+    if (!this.isWellFormedCallerId(value)) {
+      throw new MarkdownGatewayError(
+        "INVALID_CONTENT",
+        "Drive identifiers must be well-formed UTF-8 text.",
+      );
+    }
+  }
+
+  private assertWellFormedNodeIds(node: DriveNode): void {
+    if (
+      !this.isWellFormedCallerId(node.id) ||
+      !node.parentIds.every((parent) => this.isWellFormedCallerId(parent))
+    ) {
+      throw new MarkdownGatewayError(
+        "UNSUPPORTED",
+        "Drive node has malformed identifiers.",
       );
     }
   }

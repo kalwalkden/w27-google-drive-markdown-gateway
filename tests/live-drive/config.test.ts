@@ -38,6 +38,12 @@ describe("live probe configuration", () => {
       parseLiveDriveProbeConfig({ ...valid, archiveFolderId: "root" }),
     ).toThrow();
     expect(() =>
+      parseLiveDriveProbeConfig({ ...valid, testRootFolderId: "\ud800" }),
+    ).toThrow();
+    expect(() =>
+      parseLiveDriveProbeConfig({ ...valid, archiveFolderId: "\udc00" }),
+    ).toThrow();
+    expect(() =>
       parseLiveDriveProbeArgs([
         "run",
         "--config",

@@ -2,6 +2,8 @@ import { access, lstat, readFile, realpath } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import { z } from "zod";
 
+import { isWellFormedUtf16 } from "../domain/markdown.js";
+
 export const testRootMarker = Object.freeze({
   key: "w27MarkdownGatewayTestRoot",
   value: "v1",
@@ -12,8 +14,16 @@ const configSchema = z
   .object({
     schemaVersion: z.literal(1),
     authMode: z.enum(["shared-drive-adc", "my-drive-refresh-token"]),
-    testRootFolderId: z.string().trim().min(1),
-    archiveFolderId: z.string().trim().min(1),
+    testRootFolderId: z
+      .string()
+      .trim()
+      .min(1)
+      .refine(isWellFormedUtf16, "test root ID must be well-formed Unicode"),
+    archiveFolderId: z
+      .string()
+      .trim()
+      .min(1)
+      .refine(isWellFormedUtf16, "archive ID must be well-formed Unicode"),
     requestTimeoutMs: z.number().int().min(1_000).max(120_000).default(30_000),
   })
   .strict()

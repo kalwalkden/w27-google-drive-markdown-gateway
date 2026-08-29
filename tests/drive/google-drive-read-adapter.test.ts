@@ -155,6 +155,32 @@ describe("GoogleDriveReadAdapter", () => {
     expect(api.gets.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("stops Drive pages and metadata verification at a caller-provided list cap", async () => {
+    const api = new FakeDriveApi();
+    api.resources.set("root", folder("root", "root"));
+    api.resources.set("one", file("one", "one.md", ["root"], "one"));
+    api.resources.set("two", file("two", "two.md", ["root"], "two"));
+    api.resources.set("three", file("three", "three.md", ["root"], "three"));
+    api.nextPages.set("root", [
+      [
+        api.resources.get("one") as Resource,
+        api.resources.get("two") as Resource,
+      ],
+      [api.resources.get("three") as Resource],
+    ]);
+
+    await expect(
+      adapter(api).listChildren(folderId("root"), { limit: 2 }),
+    ).resolves.toMatchObject([{ id: fileId("one") }, { id: fileId("two") }]);
+    expect(api.lists).toHaveLength(1);
+    expect(api.lists[0]).toMatchObject({ pageSize: 2 });
+    expect(api.gets.map((request) => request.fileId)).toEqual([
+      "root",
+      "one",
+      "two",
+    ]);
+  });
+
   it("uses the validated Shared Drive corpus and rejects a root topology mismatch", async () => {
     const api = new FakeDriveApi();
     api.resources.set("root", folder("root", "root", [], "shared"));
@@ -330,6 +356,38 @@ describe("GoogleDriveReadAdapter", () => {
     await expect(
       adapter(api).getNode(fileId("malformed")),
     ).rejects.toMatchObject({
+      failure: "malformed",
+      operation: "get-metadata",
+    });
+  });
+
+  it("rejects malformed caller and provider IDs before requests or exposure", async () => {
+    const api = new FakeDriveApi();
+    api.resources.set("root", folder("root", "root"));
+    const drive = adapter(api);
+
+    await expect(drive.getNode(fileId("\ud800"))).rejects.toMatchObject({
+      failure: "configuration",
+      operation: "get-metadata",
+    });
+    await expect(drive.readFile(fileId("\udc00"))).rejects.toMatchObject({
+      failure: "configuration",
+      operation: "read-media",
+    });
+    expect(api.gets).toHaveLength(0);
+
+    api.resources.set(
+      "malformed-parent",
+      file("malformed-parent", "read.md", ["\ud800"], "x"),
+    );
+    await expect(
+      drive.getNode(fileId("malformed-parent")),
+    ).rejects.toMatchObject({
+      failure: "malformed",
+      operation: "get-metadata",
+    });
+    api.resources.set("malformed-id", file("\ud800", "read.md", ["root"], "x"));
+    await expect(drive.getNode(fileId("malformed-id"))).rejects.toMatchObject({
       failure: "malformed",
       operation: "get-metadata",
     });

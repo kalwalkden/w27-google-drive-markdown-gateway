@@ -1,15 +1,17 @@
 import {
+  type FileId,
+  type FolderId,
   fileId,
   folderId,
   isMarkdownName,
+  isWellFormedUtf16,
   revision,
-  type FileId,
-  type FolderId,
 } from "../domain/markdown.js";
 import type {
+  DriveListOptions,
   DriveNode,
-  DriveReadPort,
   DriveRead,
+  DriveReadPort,
   DriveSearchHit,
 } from "./drive-port.js";
 import {
@@ -93,12 +95,21 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
   }
 
   async getNode(id: FileId | FolderId): Promise<DriveNode | undefined> {
+    this.assertWellFormedId(id, "get-metadata");
     const root = await this.ensureRoot();
     if (id === this.config.rootFolderId) return root.node;
     return this.fetchMetadata(id, "get-metadata");
   }
 
-  async listChildren(folder: FolderId): Promise<readonly DriveNode[]> {
+  async listChildren(
+    folder: FolderId,
+    options?: DriveListOptions,
+  ): Promise<readonly DriveNode[]> {
+    this.assertWellFormedId(folder, "list-children");
+    const limit = options?.limit ?? this.maxTraversalNodes;
+    if (!Number.isSafeInteger(limit) || limit < 1)
+      throw new GoogleDriveProviderError("configuration", "list-children");
+    const enumerationLimit = Math.min(limit, this.maxTraversalNodes);
     const root = await this.ensureRoot();
     const result: DriveNode[] = [];
     let pageToken: string | undefined;
@@ -109,7 +120,7 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
       const data = await this.callList({
         q: `'${escapeDriveQueryLiteral(folder)}' in parents and trashed = false`,
         fields: `nextPageToken,files(${metadataFields})`,
-        pageSize: 100,
+        pageSize: Math.min(100, enumerationLimit - result.length),
         pageToken,
         supportsAllDrives: true,
         ...(root.driveId
@@ -123,8 +134,7 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
       pages += 1;
       const page = parseListResource(data, "list-children");
       for (const resource of page.files) {
-        if (result.length >= this.maxTraversalNodes)
-          throw new GoogleDriveProviderError("limit", "list-children");
+        if (result.length >= enumerationLimit) break;
         const candidate = normalizeNode(resource, "list-children");
         if (candidate.kind !== "file") {
           result.push(candidate);
@@ -139,7 +149,7 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
         result.push(current);
       }
       pageToken = page.nextPageToken;
-    } while (pageToken);
+    } while (pageToken && result.length < enumerationLimit);
     return result;
   }
 
@@ -147,6 +157,7 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
     folder: FolderId,
     options: Readonly<{ recursive: boolean; limit: number }>,
   ): Promise<readonly DriveNode[]> {
+    this.assertWellFormedId(folder, "list-children");
     if (
       typeof options.recursive !== "boolean" ||
       !Number.isSafeInteger(options.limit) ||
@@ -185,6 +196,7 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
     query: string,
     limit: number,
   ): Promise<readonly DriveSearchHit[]> {
+    this.assertWellFormedId(folder, "list-children");
     if (
       typeof query !== "string" ||
       query.length === 0 ||
@@ -243,6 +255,7 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
   }
 
   async readFile(id: FileId): Promise<DriveRead | undefined> {
+    this.assertWellFormedId(id, "read-media");
     await this.ensureRoot();
     const node = await this.fetchMetadata(id, "get-metadata");
     if (!node) return undefined;
@@ -295,7 +308,8 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
   private validateConfig(): void {
     if (
       typeof this.config.rootFolderId !== "string" ||
-      this.config.rootFolderId.trim().length === 0
+      this.config.rootFolderId.trim().length === 0 ||
+      !isWellFormedUtf16(this.config.rootFolderId)
     )
       throw new GoogleDriveProviderError("configuration", "root-validation");
     for (const value of [
@@ -310,7 +324,8 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
     if (
       this.config.auth.mode === "shared-drive-adc" &&
       (typeof this.config.sharedDriveId !== "string" ||
-        this.config.sharedDriveId.trim().length === 0)
+        this.config.sharedDriveId.trim().length === 0 ||
+        !isWellFormedUtf16(this.config.sharedDriveId))
     ) {
       throw new GoogleDriveProviderError("configuration", "root-validation");
     }
@@ -384,6 +399,7 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
     id: FileId | FolderId,
     operation: ProviderOperation,
   ): Promise<Readonly<{ node: DriveNode; driveId?: string }> | undefined> {
+    this.assertWellFormedId(id, operation);
     const response = await this.callGet(
       { fileId: id, fields: metadataFields, supportsAllDrives: true },
       operation,
@@ -400,8 +416,14 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
     }
     return {
       node,
-      driveId: requiredOptionalString(resource.driveId, operation),
+      driveId: requiredOptionalWellFormedString(resource.driveId, operation),
     };
+  }
+
+  private assertWellFormedId(id: unknown, operation: ProviderOperation): void {
+    if (typeof id !== "string" || id.length === 0 || !isWellFormedUtf16(id)) {
+      throw new GoogleDriveProviderError("configuration", operation);
+    }
   }
 
   private async callGet(
@@ -473,13 +495,21 @@ function normalizeNode(
 ): DriveNode {
   if (!isRecord(value))
     throw new GoogleDriveProviderError("malformed", operation);
-  const id = requiredString(value.id, operation);
+  const id = requiredWellFormedString(value.id, operation);
   const name = requiredString(value.name, operation);
   const mimeType = requiredString(value.mimeType, operation);
   const modifiedTime = requiredTimestamp(value.modifiedTime, operation);
   if (value.trashed !== false)
     throw new GoogleDriveProviderError("malformed", operation);
-  if (!Array.isArray(value.parents) || !value.parents.every(isNonemptyString))
+  if (
+    !Array.isArray(value.parents) ||
+    !value.parents.every(
+      (parent) =>
+        typeof parent === "string" &&
+        parent.length > 0 &&
+        isWellFormedUtf16(parent),
+    )
+  )
     throw new GoogleDriveProviderError("malformed", operation);
   const parentIds = value.parents.map(folderId);
   if (mimeType === folderMimeType) {
@@ -571,12 +601,22 @@ function requiredString(value: unknown, operation: ProviderOperation): string {
   return value;
 }
 
-function requiredOptionalString(
+function requiredWellFormedString(
+  value: unknown,
+  operation: ProviderOperation,
+): string {
+  const result = requiredString(value, operation);
+  if (!isWellFormedUtf16(result))
+    throw new GoogleDriveProviderError("malformed", operation);
+  return result;
+}
+
+function requiredOptionalWellFormedString(
   value: unknown,
   operation: ProviderOperation,
 ): string | undefined {
   if (value === undefined) return undefined;
-  return requiredString(value, operation);
+  return requiredWellFormedString(value, operation);
 }
 
 function requiredTimestamp(

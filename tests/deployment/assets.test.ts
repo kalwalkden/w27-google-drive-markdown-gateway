@@ -34,6 +34,8 @@ describe("deployment assets", () => {
     );
     expect(cloudRun).toContain('path = "/healthz"');
     expect(cloudRun).toContain("startup_probe");
+    expect(cloudRun).toContain("container_port = 8080");
+    expect(cloudRun).not.toMatch(/name\s+=\s+"PORT"/u);
     expect(cloudRun).toContain('dynamic "volume_mounts"');
     expect(cloudRun).toContain("acknowledge_public_invoker");
     expect(cloudRun).toContain("acknowledge_production_service_apply");

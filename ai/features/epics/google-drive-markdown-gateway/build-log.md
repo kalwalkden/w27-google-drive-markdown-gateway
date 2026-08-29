@@ -257,3 +257,16 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
   unavailable locally, so their executable validation stays in the operator checklist.
 - No cloud apply, image build, credential lookup, live Drive, or external network operation ran.
 - Status: repaired; narrow independent acceptance rerun pending
+
+## 2026-08-29 — Drive and service feature-acceptance repairs
+
+- Drive acceptance found malformed opaque IDs could cross caller, configuration, or provider
+  boundaries. All such IDs and provider parent IDs now require well-formed UTF-16 before dispatch
+  or exposure, with list/search/read/configuration/mutation regressions.
+- Service acceptance found Cloud Run's reserved `PORT` was set explicitly and list results were
+  capped only after enumeration. Terraform now relies on Cloud Run's injected port, and the
+  configured list cap is enforced at the service/Drive port before page and metadata work.
+- Validation: full combined `CI=true pnpm check` passed with 175 tests after integration with the
+  MCP adapter, plus diff and vendored-skill checks.
+- No live Drive, credential, cloud, provider, or external network operation ran.
+- Status: repaired; independent acceptance reruns pending

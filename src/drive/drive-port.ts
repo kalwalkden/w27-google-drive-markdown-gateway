@@ -23,10 +23,22 @@ export interface DriveSearchHit {
   readonly excerpt?: string;
 }
 
+/** A hard upper bound for a single child enumeration. */
+export interface DriveListOptions {
+  readonly limit: number;
+}
+
 /** Facts used by MarkdownService to resolve and verify documents. */
 export interface DriveReadPort {
   getNode(id: FileId | FolderId): Promise<DriveNode | undefined>;
-  listChildren(folderId: FolderId): Promise<readonly DriveNode[]>;
+  /**
+   * Returns no more than `options.limit` children when a bound is supplied.
+   * Providers must stop enumeration and metadata verification at that bound.
+   */
+  listChildren(
+    folderId: FolderId,
+    options?: DriveListOptions,
+  ): Promise<readonly DriveNode[]>;
   listDescendants(
     folderId: FolderId,
     options: Readonly<{ recursive: boolean; limit: number }>,

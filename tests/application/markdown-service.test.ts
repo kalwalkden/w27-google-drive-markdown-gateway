@@ -2,15 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import { MarkdownService } from "../../src/application/markdown-service.js";
 import {
+  type FileId,
+  type FolderId,
   fileId,
   folderId,
   MarkdownGatewayError,
-  revision,
-  type FolderId,
   type Revision,
+  revision,
 } from "../../src/domain/markdown.js";
-import { InMemoryDrivePort } from "../../src/drive/in-memory-drive-port.js";
 import type {
+  DriveListOptions,
   DriveNode,
   DrivePort,
   DriveRead,
@@ -18,6 +19,7 @@ import type {
   RawDriveWritePort,
 } from "../../src/drive/drive-port.js";
 import { GuardedDriveWritePort } from "../../src/drive/guarded-drive-write-port.js";
+import { InMemoryDrivePort } from "../../src/drive/in-memory-drive-port.js";
 import { WriteGate } from "../../src/write-gate/gate.js";
 import { InMemoryConsumedApprovalStore } from "../../src/write-gate/replay-store.js";
 import {
@@ -132,6 +134,64 @@ function portFrom(
 }
 
 describe("MarkdownService", () => {
+  it("rejects malformed configured and caller IDs without exposing or dispatching them", async () => {
+    const drive = new InMemoryDrivePort();
+    drive.addFixture({ id: "root", name: "root", kind: "folder" });
+    drive.addFixture({
+      id: "archive",
+      name: "archive",
+      kind: "folder",
+      parentIds: ["root"],
+    });
+    let configurationError: unknown;
+    try {
+      new MarkdownService(drive, {
+        rootFolderId: folderId("\ud800"),
+        archiveFolderId: folderId("archive"),
+      });
+    } catch (error) {
+      configurationError = error;
+    }
+    expect(configurationError).toMatchObject({ code: "INVALID_ARCHIVE" });
+
+    const active = fixture();
+    active.drive.addFixture({
+      id: "\ud800",
+      name: "hostile.md",
+      kind: "file",
+      parentIds: ["root"],
+      content: "hidden",
+    });
+    await expect(active.service.listMarkdown()).resolves.not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ fileId: fileId("\ud800") }),
+      ]),
+    );
+    await expect(
+      active.service.searchMarkdown({ query: "hostile" }),
+    ).resolves.not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ fileId: fileId("\ud800") }),
+      ]),
+    );
+    await expect(
+      active.service.readMarkdown({ fileId: fileId("\ud800") }),
+    ).rejects.toMatchObject({ code: "INVALID_CONTENT" });
+    await expect(
+      active.session.updateMarkdown({
+        fileId: fileId("\ud800"),
+        expectedRevision: revision("1"),
+        content: "replacement",
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_CONTENT" });
+    await expect(
+      active.session.archiveMarkdown({
+        fileId: fileId("\ud800"),
+        expectedRevision: revision("1"),
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_CONTENT" });
+  });
+
   it("keeps writes unavailable until a guarded writer is composed", async () => {
     const { service } = (() => {
       const drive = new InMemoryDrivePort();
@@ -224,6 +284,56 @@ describe("MarkdownService", () => {
     );
     expect(emojiHit?.excerpt?.startsWith("😀")).toBe(true);
     expect(() => new TextEncoder().encode(emojiHit?.excerpt)).not.toThrow();
+  });
+
+  it("passes the configured list cap to the port before verifying metadata", async () => {
+    class TrackingDrive extends InMemoryDrivePort {
+      readonly listLimits: (number | undefined)[] = [];
+      readonly metadataIds: string[] = [];
+
+      override async listChildren(
+        folder: FolderId,
+        options?: DriveListOptions,
+      ): Promise<readonly DriveNode[]> {
+        this.listLimits.push(options?.limit);
+        return super.listChildren(folder, options);
+      }
+
+      override async getNode(id: FileId | FolderId) {
+        this.metadataIds.push(id);
+        return super.getNode(id);
+      }
+    }
+
+    const drive = new TrackingDrive();
+    drive.addFixture({ id: "root", name: "root", kind: "folder" });
+    for (const id of ["one", "two", "three"]) {
+      drive.addFixture({
+        id,
+        name: `${id}.md`,
+        kind: "file",
+        parentIds: ["root"],
+        content: id,
+      });
+    }
+    drive.addFixture({
+      id: "archive",
+      name: "archive",
+      kind: "folder",
+      parentIds: ["root"],
+    });
+    const service = new MarkdownService(drive, {
+      rootFolderId: folderId("root"),
+      archiveFolderId: folderId("archive"),
+      maxListResults: 2,
+    });
+
+    await expect(service.listMarkdown()).resolves.toMatchObject([
+      { relativePath: "one.md" },
+      { relativePath: "two.md" },
+    ]);
+    expect(drive.listLimits).toEqual([2]);
+    expect(drive.metadataIds).not.toContain("three");
   });
 
   it("creates and conditionally updates direct-root files", async () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MarkdownGatewayError,
+  isWellFormedUtf16,
   parseRelativePath,
   requireContentWithinLimit,
   requireMarkdownPath,
@@ -68,4 +69,10 @@ describe("Markdown domain validation", () => {
       );
     },
   );
+
+  it("distinguishes well-formed opaque Unicode from lone-surrogate values", () => {
+    expect(isWellFormedUtf16("drive-😀")).toBe(true);
+    expect(isWellFormedUtf16("drive-\ud800")).toBe(false);
+    expect(isWellFormedUtf16(12)).toBe(false);
+  });
 });
