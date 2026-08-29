@@ -586,6 +586,46 @@ describe("JSON API", () => {
     }
   });
 
+  it.each([
+    "authentication",
+    "throttled",
+    "transient",
+    "malformed",
+    "configuration",
+  ] as const)(
+    "keeps Drive failure %s classified and content-free",
+    async (failure) => {
+      const events: MarkdownApiAuditEvent[] = [];
+      const privateDetail = `provider-private-${failure}`;
+      const response = await call(
+        {
+          auditLogger: { info: (event) => events.push(event) },
+          service: {
+            async listMarkdown() {
+              throw new DriveProviderError(failure, "read-media", 599);
+            },
+            searchMarkdown: fakeService().searchMarkdown,
+            readMarkdown: fakeService().readMarkdown,
+          },
+        },
+        `/v1/markdown/list?path=${encodeURIComponent(privateDetail)}`,
+        { headers: authorized },
+      );
+
+      expect(response.status).toBe(503);
+      expect(await response.text()).not.toContain(privateDetail);
+      expect(events).toEqual([
+        expect.objectContaining({
+          result: "upstream_unavailable",
+          dependency: "drive",
+          dependencyFailure: failure,
+        }),
+      ]);
+      expect(JSON.stringify(events)).not.toContain("599");
+      expect(JSON.stringify(events)).not.toContain("read-media");
+    },
+  );
+
   it("bounds result counts and response bytes without logging document content", async () => {
     const events: MarkdownApiAuditEvent[] = [];
     const tooMany = await call(

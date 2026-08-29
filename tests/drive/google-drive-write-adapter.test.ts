@@ -119,6 +119,26 @@ describe("GoogleDriveWriteAdapter", () => {
     expect(http.requests).toHaveLength(2);
   });
 
+  it("dispatches a transient send failure once and never retries it", async () => {
+    const http = new CapturingHttp();
+    let sends = 0;
+    http.send = async (request) => {
+      http.requests.push(request);
+      sends += 1;
+      throw new Error("transport-private");
+    };
+
+    await expect(
+      new GoogleDriveWriteAdapter(http).updateFile(
+        fileId("file"),
+        revision('"old"'),
+        "hey",
+      ),
+    ).resolves.toEqual({ outcome: "unsupported" });
+    expect(sends).toBe(1);
+    expect(http.requests).toHaveLength(1);
+  });
+
   it("fails closed when a successful response lacks a raw ETag", async () => {
     const http = new CapturingHttp();
     http.response = {
@@ -162,6 +182,26 @@ describe("GoogleDriveWriteAdapter", () => {
       adapter.updateFile(fileId("file"), revision('"old"'), "\udc00"),
     ).resolves.toEqual({ outcome: "unsupported" });
     expect(http.requests).toHaveLength(0);
+  });
+
+  it("refuses malformed filenames before dispatch and from successful metadata", async () => {
+    const http = new CapturingHttp();
+    const adapter = new GoogleDriveWriteAdapter(http);
+    await expect(
+      adapter.createFile(folderId("docs"), "\ud800.md", "hey"),
+    ).resolves.toEqual({ outcome: "unsupported" });
+    expect(http.requests).toHaveLength(0);
+
+    http.response = {
+      ...http.response,
+      body: new TextEncoder().encode(
+        JSON.stringify({ ...metadata, name: "\ud800.md" }),
+      ),
+    };
+    await expect(
+      adapter.createFile(folderId("docs"), "new.md", "hey"),
+    ).resolves.toEqual({ outcome: "unsupported" });
+    expect(http.requests).toHaveLength(1);
   });
 
   it("refuses malformed opaque request and response IDs before dispatch or exposure", async () => {

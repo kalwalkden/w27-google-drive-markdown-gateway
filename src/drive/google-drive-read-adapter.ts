@@ -508,8 +508,8 @@ function normalizeNode(
   if (!isRecord(value))
     throw new GoogleDriveProviderError("malformed", operation);
   const id = requiredWellFormedString(value.id, operation);
-  const name = requiredString(value.name, operation);
-  const mimeType = requiredString(value.mimeType, operation);
+  const name = requiredWellFormedString(value.name, operation);
+  const mimeType = requiredWellFormedString(value.mimeType, operation);
   const modifiedTime = requiredTimestamp(value.modifiedTime, operation);
   if (value.trashed !== false)
     throw new GoogleDriveProviderError("malformed", operation);

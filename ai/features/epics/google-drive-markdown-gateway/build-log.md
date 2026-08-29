@@ -424,3 +424,34 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
   vendored skills. No live Drive, Work, Codex cloud, credential, or external network call ran.
 - Status: narrow acceptance repairs complete; the separately identified production write/archive
   product gap remains open and will be handled as an explicit spec-first feature.
+
+## 2026-08-29 — Production write and tree support corrective planning
+
+- Planning base: committed HEAD `1c104f5`; working tree was clean before planning.
+- Added approved feature `07-production-write-and-tree-support` with four ordered task briefs and a
+  request/operator flow artifact. It is ordered before remaining operational hardening and migration.
+- Decisions: restore bounded duplicate-aware tree reads; replace the impractical signed
+  evidence/JWS/replay runtime lease with explicit default-off deployment authority; add
+  single-dispatch nested create/update/archive with exact revisions and pre/post topology checks;
+  classify unprovable post-dispatch state as `OUTCOME_UNKNOWN` with no retry or rollback.
+- Security assumptions: authenticated clients remain untrusted and concurrent; Drive/deployment
+  administrators are trusted and change-controlled; no atomic guarantee spans a target file and its
+  ancestor folders.
+- Validation: vendored-skill integrity, feature/brief/checklist structural checks, and scoped
+  `git diff --check` passed.
+- No product code, credential, Drive request, Work/Codex session, cloud policy, Terraform apply, or
+  live success claim was made.
+- Status: plan approved; task shaping and implementation pending.
+
+## 2026-08-29 — 05-operational-hardening / 002-resilience-and-drive-edge-case-coverage
+
+- Implementation: `gpt-5.6-terra`, high reasoning. Added fake-only root-cache refresh, rename-during-
+  media, malformed provider Unicode, one-attempt transport failure, filename validation, and closed
+  Drive-failure/redaction coverage across reader, writer, and HTTP boundaries.
+- Narrow product corrections reject malformed UTF-16 Drive filenames and MIME types before request
+  construction or metadata exposure. No retry, archive, topology expansion, or live behavior was
+  added.
+- Validation: full combined `CI=true pnpm check` passed with 262 tests, build verification, and 10
+  vendored skills. Independent scoped task review found no issues.
+- No live Drive, credential, cloud, Work, Codex, or external network call ran.
+- Status: complete.

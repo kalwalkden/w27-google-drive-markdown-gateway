@@ -53,7 +53,8 @@ export class GoogleDriveWriteAdapter implements RawDriveWritePort {
     name: string,
     content: string,
   ): Promise<CreateWriteResult> {
-    if (!isWellFormedOpaqueId(parentId)) return { outcome: "unsupported" };
+    if (!isWellFormedOpaqueId(parentId) || !isWellFormedOpaqueId(name))
+      return { outcome: "unsupported" };
     try {
       assertWellFormedUtf16(content);
     } catch {
@@ -222,8 +223,8 @@ function responseNode(
   }
   if (!isRecord(value) || value.trashed !== false) return undefined;
   const id = nonemptyWellFormed(value.id);
-  const name = nonempty(value.name);
-  const mimeType = nonempty(value.mimeType);
+  const name = nonemptyWellFormed(value.name);
+  const mimeType = nonemptyWellFormed(value.mimeType);
   const modifiedTime = nonempty(value.modifiedTime);
   const size = value.size;
   if (

@@ -2,7 +2,7 @@
 
 ## Status
 
-Approved
+Complete
 
 ## Context
 
@@ -39,4 +39,3 @@ Unit/contract/integration tests, Drive error translation, timeout/retry boundary
 ## Open Questions
 
 None.
-

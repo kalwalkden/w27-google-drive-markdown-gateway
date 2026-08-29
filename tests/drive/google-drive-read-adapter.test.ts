@@ -156,6 +156,44 @@ describe("GoogleDriveReadAdapter", () => {
     expect(api.gets.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("expires root validation without authorizing a stale root after a failed refresh", async () => {
+    const api = new FakeDriveApi();
+    api.resources.set("root", folder("root", "root"));
+    api.resources.set("one", file("one", "one.md", ["root"], "one"));
+    let now = 0;
+    const clocked = new GoogleDriveReadAdapter(
+      {
+        rootFolderId: folderId("root"),
+        auth: {
+          mode: "my-drive-refresh-token",
+          credentials: { clientId: "c", clientSecret: "s", refreshToken: "r" },
+        },
+        rootCacheTtlMs: 10,
+      },
+      api,
+      () => now,
+    );
+
+    await expect(clocked.listChildren(folderId("root"))).resolves.toHaveLength(
+      1,
+    );
+    const initialGetCount = api.gets.length;
+    now = 11;
+    api.error = { response: { status: 503, data: "provider-private" } };
+    await expect(clocked.listChildren(folderId("root"))).rejects.toMatchObject({
+      failure: "transient",
+      operation: "root-validation",
+    });
+    expect(api.gets).toHaveLength(initialGetCount + 1);
+    expect(api.lists).toHaveLength(1);
+
+    api.error = undefined;
+    await expect(clocked.listChildren(folderId("root"))).resolves.toHaveLength(
+      1,
+    );
+    expect(api.gets).toHaveLength(initialGetCount + 3);
+  });
+
   it("signals an opaque overflow before parsing or fetching the final raw child", async () => {
     const api = new FakeDriveApi();
     api.resources.set("root", folder("root", "root"));
@@ -443,6 +481,29 @@ describe("GoogleDriveReadAdapter", () => {
     });
   });
 
+  it("rejects a file renamed during media transfer without exposing stale content", async () => {
+    const api = new FakeDriveApi();
+    api.resources.set("root", folder("root", "root"));
+    api.resources.set("read", file("read", "read.md", ["root"], "hello"));
+    api.media.set("read", new TextEncoder().encode("hello"));
+    const originalGet = api.files.get;
+    api.files.get = async (request) => {
+      const response = await originalGet(request);
+      if (request.alt === "media") {
+        api.resources.set(
+          "read",
+          file("read", "renamed.md", ["root"], "hello"),
+        );
+      }
+      return response;
+    };
+
+    await expect(adapter(api).readFile(fileId("read"))).rejects.toMatchObject({
+      failure: "malformed",
+      operation: "read-media",
+    });
+  });
+
   it("keeps bounded excerpts well-formed when their boundary meets a surrogate pair", async () => {
     const api = new FakeDriveApi();
     api.resources.set("root", folder("root", "root"));
@@ -483,6 +544,22 @@ describe("GoogleDriveReadAdapter", () => {
       request.fileId === "malformed"
         ? { data: undefined }
         : originalGet(request);
+
+    await expect(
+      adapter(api).getNode(fileId("malformed")),
+    ).rejects.toMatchObject({
+      failure: "malformed",
+      operation: "get-metadata",
+    });
+  });
+
+  it("rejects malformed provider Unicode before returning metadata", async () => {
+    const api = new FakeDriveApi();
+    api.resources.set("root", folder("root", "root"));
+    api.resources.set(
+      "malformed",
+      file("malformed", "\ud800.md", ["root"], "x"),
+    );
 
     await expect(
       adapter(api).getNode(fileId("malformed")),
