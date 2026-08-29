@@ -2,7 +2,7 @@
 
 ## Status
 
-Approved
+Complete
 
 ## Requirements
 
@@ -27,4 +27,3 @@ No product source exists yet. `google-drive-markdown-gateway-handoff.md` defines
 ## Open Questions
 
 None.
-
