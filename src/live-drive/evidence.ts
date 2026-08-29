@@ -66,23 +66,32 @@ export interface ProbeCheck {
     | "cleanup";
   method: "GET" | "POST" | "PATCH";
   ifMatchSent: boolean;
+  /** Exact raw ETag sent as If-Match. ETags are capability observations, not secrets. */
+  ifMatchEtag?: string;
   supportsAllDrivesSent: true;
-  httpStatus?: number;
-  responseEtag?: string;
-  version?: string;
-  headRevisionId?: string;
-  opaqueFileRef?: string;
-  opaqueParentRefs?: string[];
-  payloadSha256?: string;
-  payloadByteLength?: number;
+  /** Status and ETag from the operation itself, never inferred from a later readback. */
+  operationStatus?: number;
+  operationEtag?: string;
+  /** A separately observed metadata-plus-download snapshot. */
+  readback?: {
+    metadataStatus: number;
+    downloadStatus: number;
+    responseEtag?: string;
+    version?: string;
+    headRevisionId?: string;
+    opaqueFileRef?: string;
+    opaqueParentRefs?: string[];
+    payloadSha256?: string;
+    payloadByteLength?: number;
+  };
   expected: EvidenceExpectedCode;
   passed: boolean;
   reason: EvidenceReasonCode;
 }
 
 export interface LiveDriveEvidence {
-  schemaVersion: 1;
-  probeVersion: "1";
+  schemaVersion: 2;
+  probeVersion: "2";
   runId: string;
   startedAt: string;
   finishedAt: string;
@@ -115,21 +124,32 @@ const checkSchema = z
     ]),
     method: z.enum(["GET", "POST", "PATCH"]),
     ifMatchSent: z.boolean(),
+    ifMatchEtag: z.string().min(1).optional(),
     supportsAllDrivesSent: z.literal(true),
-    httpStatus: z.number().int().optional(),
-    responseEtag: z.string().optional(),
-    version: z.string().optional(),
-    headRevisionId: z.string().optional(),
-    opaqueFileRef: z
-      .string()
-      .regex(/^[a-f0-9]{64}$/)
+    operationStatus: z.number().int().optional(),
+    operationEtag: z.string().optional(),
+    readback: z
+      .object({
+        metadataStatus: z.number().int(),
+        downloadStatus: z.number().int(),
+        responseEtag: z.string().optional(),
+        version: z.string().optional(),
+        headRevisionId: z.string().optional(),
+        opaqueFileRef: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
+        opaqueParentRefs: z
+          .array(z.string().regex(/^[a-f0-9]{64}$/))
+          .optional(),
+        payloadSha256: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
+        payloadByteLength: z.number().int().nonnegative().optional(),
+      })
+      .strict()
       .optional(),
-    opaqueParentRefs: z.array(z.string().regex(/^[a-f0-9]{64}$/)).optional(),
-    payloadSha256: z
-      .string()
-      .regex(/^[a-f0-9]{64}$/)
-      .optional(),
-    payloadByteLength: z.number().int().nonnegative().optional(),
     expected: z.enum(evidenceExpectedCodes),
     passed: z.boolean(),
     reason: z.enum(evidenceReasonCodes),
@@ -138,8 +158,8 @@ const checkSchema = z
 
 const evidenceSchema = z
   .object({
-    schemaVersion: z.literal(1),
-    probeVersion: z.literal("1"),
+    schemaVersion: z.literal(2),
+    probeVersion: z.literal("2"),
     runId: z.string().uuid(),
     startedAt: z.string().datetime(),
     finishedAt: z.string().datetime(),

@@ -28,6 +28,8 @@ export interface DriveResponse<T> {
   status: number;
   etag?: string;
   value?: T;
+  /** A minimally parsed file ID from a successful response that otherwise failed strict parsing. */
+  candidateId?: string;
   malformed?: boolean;
 }
 
@@ -52,12 +54,20 @@ function parseMetadata(
   if (response.body.length === 0)
     return { status: response.status, etag, malformed: true };
   try {
-    const value = fileMetadataSchema.safeParse(
-      JSON.parse(new TextDecoder().decode(response.body)),
+    const decoded: unknown = JSON.parse(
+      new TextDecoder().decode(response.body),
     );
+    const candidateId =
+      decoded &&
+      typeof decoded === "object" &&
+      typeof (decoded as { id?: unknown }).id === "string" &&
+      (decoded as { id: string }).id.trim().length > 0
+        ? (decoded as { id: string }).id
+        : undefined;
+    const value = fileMetadataSchema.safeParse(decoded);
     return value.success
       ? { status: response.status, etag, value: value.data }
-      : { status: response.status, etag, malformed: true };
+      : { status: response.status, etag, candidateId, malformed: true };
   } catch {
     return { status: response.status, etag, malformed: true };
   }

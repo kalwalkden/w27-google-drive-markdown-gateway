@@ -1,4 +1,4 @@
-import { access, lstat, readFile } from "node:fs/promises";
+import { access, lstat, readFile, realpath } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import { z } from "zod";
 
@@ -77,7 +77,7 @@ export async function loadLiveDriveProbeConfig(
 }
 
 export async function findRepositoryRoot(startPath: string): Promise<string> {
-  let current = resolve(startPath);
+  let current = await realpath(resolve(startPath));
   while (true) {
     try {
       await access(resolve(current, "package.json"));
@@ -91,14 +91,49 @@ export async function findRepositoryRoot(startPath: string): Promise<string> {
   }
 }
 
+function isOutside(parent: string, repositoryRoot: string): boolean {
+  const relativePath = relative(repositoryRoot, parent);
+  return (
+    Boolean(relativePath) &&
+    (relativePath === ".." ||
+      relativePath.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`))
+  );
+}
+
+async function canonicalExistingParent(path: string): Promise<string> {
+  let current = resolve(path);
+  while (true) {
+    try {
+      return await realpath(current);
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) throw new Error("path has no existing parent");
+      current = parent;
+    }
+  }
+}
+
+/** Reject lexical and ancestor-symlink escapes before an exclusive result file is created. */
+export async function assertOutputOutsideRepository(
+  outputPath: string,
+  repositoryRoot: string,
+): Promise<void> {
+  const canonicalRoot = await realpath(resolve(repositoryRoot));
+  const canonicalParent = await canonicalExistingParent(
+    dirname(resolve(outputPath)),
+  );
+  if (!isOutside(canonicalParent, canonicalRoot))
+    throw new Error("result output must be outside the repository");
+}
+
 export async function loadOAuthSecret(
   path: string,
   repositoryRoot: string,
 ): Promise<OAuthSecret> {
   const resolvedPath = resolve(path);
-  const resolvedRoot = resolve(repositoryRoot);
-  const pathFromRoot = relative(resolvedRoot, resolvedPath);
-  if (!pathFromRoot.startsWith("..")) {
+  const resolvedRoot = await realpath(resolve(repositoryRoot));
+  const canonicalPath = await realpath(resolvedPath);
+  if (!isOutside(canonicalPath, resolvedRoot)) {
     throw new Error("OAuth secret file must be outside the repository");
   }
   const file = await lstat(resolvedPath);

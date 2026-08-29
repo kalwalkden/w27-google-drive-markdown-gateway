@@ -12,8 +12,8 @@ import {
 } from "../../src/live-drive/evidence.js";
 
 const example = {
-  schemaVersion: 1 as const,
-  probeVersion: "1" as const,
+  schemaVersion: 2 as const,
+  probeVersion: "2" as const,
   runId: "00000000-0000-4000-8000-000000000000",
   startedAt: "2026-01-01T00:00:00.000Z",
   finishedAt: "2026-01-01T00:00:01.000Z",
@@ -39,6 +39,13 @@ describe("evidence redaction", () => {
     ).toThrow();
     expect(() =>
       assertSanitizedEvidence({ ...example, unexpected: "never" }),
+    ).toThrow();
+    expect(() =>
+      assertSanitizedEvidence({
+        ...example,
+        schemaVersion: 1,
+        probeVersion: "1",
+      }),
     ).toThrow();
     expect(() =>
       parseLiveDriveEvidence({

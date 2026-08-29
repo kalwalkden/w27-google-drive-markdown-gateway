@@ -19,6 +19,7 @@ export const writeGateDenialReasons = [
   "approval-lifetime-invalid",
   "approval-replayed",
   "approval-store-unavailable",
+  "clock-invalid",
   "lease-invalid",
   "lease-expired",
   "lease-generation-failed",

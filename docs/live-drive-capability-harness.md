@@ -58,8 +58,11 @@ Omit `W27_DRIVE_PROBE_OAUTH_SECRET_FILE` for ADC. The result records only digest
 opaque per-run identifier references, ETags, versions, and revision IDs. It records no content,
 folder IDs, URLs, credentials, paths, request/response bodies, or error details.
 
-A zero exit code requires both stale mutations to return HTTP 412 with unchanged readback and the
-created file to be verified in the archive. `UNSUPPORTED`, `INCONCLUSIVE`, configuration failure,
+A zero exit code requires recorded operation statuses: a 2xx create and both current-ETag fresh
+updates, plus HTTP 412 for both stale mutations. Each proof also records a separate successful
+metadata/download readback; the evidence gate rejects older schema versions or records that blur
+the mutation response with that readback. The created file must be verified in the archive.
+`UNSUPPORTED`, `INCONCLUSIVE`, configuration failure,
 and cleanup failure are nonzero and preserve the fail-closed write policy. If a hard kill prevents
 cleanup/evidence, inspect only the marked dedicated test root for the fixed
 `w27-drive-capability-` filename prefix and move the disposable Markdown file to the archive.

@@ -21,14 +21,25 @@ Treat it as input to feature planning, not as an already approved task-level imp
 
 ## Validation
 
-The current setup check is:
+Run the vendored-skill integrity check before planning or implementation:
 
 ```bash
 ./scripts/verify-vendored-skills.sh
 ```
 
-Once the product is scaffolded, record its canonical lint, type-check, and test commands here and in
-the repository architecture documentation.
+The canonical project validation is:
+
+```bash
+CI=true pnpm lint
+CI=true pnpm format:check
+CI=true pnpm typecheck
+CI=true pnpm test
+CI=true pnpm build
+CI=true pnpm check
+```
+
+`CI=true pnpm check` runs the complete lint, formatting, type-check, test, build, and vendored-skill
+validation sequence. Keep `ARCHITECTURE.md` aligned if these commands change.
 
 ## Security
 
@@ -41,7 +52,8 @@ the repository architecture documentation.
 ## Architecture
 Full report: `ARCHITECTURE.md`
 
-- Lint/format: not configured
-- Type-check: not configured
-- Test: `./scripts/verify-vendored-skills.sh` (setup integrity only)
+- Lint/format: `CI=true pnpm lint`, `CI=true pnpm format:check`
+- Type-check: `CI=true pnpm typecheck`
+- Test: `CI=true pnpm test`
+- Full validation: `CI=true pnpm check`
 <!-- discover-architecture:end -->

@@ -224,6 +224,45 @@ describe("write gate", () => {
     });
   });
 
+  it("fails closed for throwing or invalid clocks without retaining a usable lease", async () => {
+    const expired = validApproval(evidenceBytes(validEvidence()));
+    expired.expiresAt = "2026-01-01T00:02:00.000Z";
+    const throwing = new WriteGate({
+      ...dependencies(expired),
+      clock: {
+        now: () => {
+          throw new Error("clock unavailable");
+        },
+      },
+    });
+    await expect(throwing.evaluate(input())).resolves.toMatchObject({
+      allowed: false,
+      reason: "clock-invalid",
+    });
+
+    const invalid = new WriteGate({
+      ...dependencies(),
+      clock: { now: () => new Date(Number.NaN) },
+    });
+    await expect(invalid.evaluate(input())).resolves.toMatchObject({
+      allowed: false,
+      reason: "clock-invalid",
+    });
+
+    let now = new Date("2026-01-01T00:03:00.000Z");
+    const gate = new WriteGate({
+      ...dependencies(),
+      clock: { now: () => now },
+    });
+    const decision = await gate.evaluate(input());
+    if (!decision.allowed) throw new Error("expected lease");
+    now = new Date(Number.NaN);
+    expect(gate.validateLease(decision.lease)).toMatchObject({
+      allowed: false,
+      reason: "clock-invalid",
+    });
+  });
+
   it("never lets a lease outlive the signed approval", async () => {
     let now = new Date("2026-01-01T00:03:00.000Z");
     const value = input();

@@ -86,3 +86,20 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - Result: approved implementation package for a read-only `googleapis` adapter; exact-parent
   traversal, fatal UTF-8 decoding, bounded reads, safe failures, and zero-call unsupported writes.
 - Status: specification complete; implementation pending
+
+## 2026-08-29 — 00-platform-validation independent feature-review repair
+
+- Independent review findings repaired without touching the in-progress Drive-core adapter work:
+  - upgraded the capability evidence contract to schema/probe version 2 so operation responses and
+    metadata/download readbacks are distinct and required proof facts;
+  - require recorded 2xx create/fresh/readback facts, exact recorded current `If-Match` values, and
+    exact 412 stale-operation facts before the write gate can accept evidence;
+  - fail closed on throwing, invalid, or non-finite clocks before issuing or accepting a lease;
+  - canonicalize repository, OAuth-secret, and output-parent paths to block ancestor-symlink escapes;
+  - retain a minimally parsed successful-create candidate ID solely to attempt exact-ID, identity
+    verified archival cleanup after malformed metadata.
+- Validation: focused fake-only probe/gate tests, `CI=true pnpm typecheck`, complete
+  `CI=true pnpm check` (88 tests in the combined worktree), `git diff --check`, and a
+  credential-pattern scan passed.
+- No live Drive request, signing, credential discovery, or production write occurred. Feature status
+  remains open pending the independent review rerun and its separate archival gate.

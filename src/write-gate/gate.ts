@@ -137,7 +137,11 @@ function approvalTimeFailure(
   const issuedAt = Date.parse(approval.issuedAt);
   const expiresAt = Date.parse(approval.expiresAt);
   const evidenceFinishedAt = Date.parse(evidence.finishedAt);
-  if (!Number.isFinite(issuedAt) || !Number.isFinite(expiresAt))
+  if (
+    !Number.isFinite(issuedAt) ||
+    !Number.isFinite(expiresAt) ||
+    !Number.isFinite(evidenceFinishedAt)
+  )
     return "approval-malformed";
   if (
     expiresAt <= issuedAt ||
@@ -235,7 +239,8 @@ export class WriteGate {
       return deny("approval-digest-mismatch");
     if (!approvalMatchesTrust(approval, evidence, trust))
       return deny("approval-binding-mismatch");
-    const now = this.clock.now();
+    const now = this.sampleClock();
+    if (!now) return deny("clock-invalid");
     const timeFailure = approvalTimeFailure(approval, evidence, now, trust);
     if (timeFailure) return deny(timeFailure);
     const approvalExpiresAt = Date.parse(approval.expiresAt);
@@ -256,7 +261,8 @@ export class WriteGate {
       now.getTime() + trust.leaseLifetimeMs,
       approvalExpiresAt,
     );
-    if (leaseExpiresAtMs <= now.getTime()) return deny("approval-expired");
+    if (!Number.isFinite(leaseExpiresAtMs) || leaseExpiresAtMs <= now.getTime())
+      return deny("approval-expired");
     let material: Uint8Array;
     try {
       material = this.random(32);
@@ -276,7 +282,9 @@ export class WriteGate {
 
   /** Future mutation boundaries call this immediately before sending a Drive request. */
   validateLease(lease: WriteLease): WriteGateDecision {
-    const now = this.clock.now().getTime();
+    const current = this.sampleClock();
+    if (!current) return deny("clock-invalid");
+    const now = current.getTime();
     let value: unknown;
     try {
       value = lease?.value;
@@ -297,6 +305,17 @@ export class WriteGate {
   private removeExpiredLeases(now: number): void {
     for (const [value, record] of this.leases) {
       if (record.expiresAtMs <= now) this.leases.delete(value);
+    }
+  }
+
+  private sampleClock(): Date | undefined {
+    try {
+      const value = this.clock.now();
+      return value instanceof Date && Number.isFinite(value.getTime())
+        ? value
+        : undefined;
+    } catch {
+      return undefined;
     }
   }
 }

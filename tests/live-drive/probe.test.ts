@@ -23,6 +23,8 @@ class FakeDrive {
   cleanupMoveFails = false;
   omitEtag = false;
   invalidVersion = false;
+  malformedCreateWithCandidate = false;
+  movedFileIds: string[] = [];
   name = "w27-drive-capability-unit.md";
   markedRoot = true;
   archiveParent = "root";
@@ -78,6 +80,13 @@ class FakeDrive {
       create: async (name: string, _root: string, content: Uint8Array) => {
         this.name = name;
         this.content = content;
+        if (this.malformedCreateWithCandidate)
+          return {
+            status: 200,
+            etag: this.etag,
+            candidateId: "file",
+            malformed: true,
+          };
         return this.response(this.metadata("file"));
       },
       updateContent: async (_id: string, content: Uint8Array, etag: string) => {
@@ -104,12 +113,8 @@ class FakeDrive {
         this.etag = `"v${this.version}"`;
         return this.response(this.metadata("file"));
       },
-      move: async (
-        _id: string,
-        add: string,
-        _remove: string,
-        etag?: string,
-      ) => {
+      move: async (id: string, add: string, _remove: string, etag?: string) => {
+        this.movedFileIds.push(id);
         if (etag && etag !== this.etag) {
           if (!this.staleParentIgnored) return this.response(undefined, 412);
           this.parent = add;
@@ -149,11 +154,11 @@ describe("live Drive capability probe", () => {
     expect(evidence.cleanup.status).toBe("ARCHIVED");
     expect(
       evidence.checks.find((entry) => entry.id === "stale-content-update")
-        ?.httpStatus,
+        ?.operationStatus,
     ).toBe(412);
     expect(
       evidence.checks.find((entry) => entry.id === "stale-parent-move")
-        ?.httpStatus,
+        ?.operationStatus,
     ).toBe(412);
   });
 
@@ -246,6 +251,20 @@ describe("live Drive capability probe", () => {
     expect(evidence.outcome).toBe("UNSUPPORTED");
   });
 
+  it("arms exact-ID cleanup after a malformed successful create response", async () => {
+    const drive = new FakeDrive();
+    drive.malformedCreateWithCandidate = true;
+    const evidence = await runLiveDriveCapabilityProbe(config, {
+      actorA: drive.client(),
+      actorB: drive.client(),
+      cleanup: drive.client(),
+    });
+    expect(evidence.outcome).toBe("INCONCLUSIVE");
+    expect(evidence.cleanup.status).toBe("ARCHIVED");
+    expect(drive.movedFileIds).toEqual(["file"]);
+    expect(evidence.cleanup.status).not.toBe("NOT_CREATED");
+  });
+
   it("requires numeric nondecreasing Drive version observations", async () => {
     const drive = new FakeDrive();
     drive.invalidVersion = true;
@@ -276,7 +295,7 @@ describe("live Drive capability probe", () => {
       expect.objectContaining({
         id: "cleanup-conditional-conflict",
         ifMatchSent: true,
-        httpStatus: 412,
+        operationStatus: 412,
       }),
     );
     expect(fallbackEvidence.checks).toContainEqual(

@@ -58,4 +58,17 @@ describe("RawDriveClient", () => {
       malformed: true,
     });
   });
+
+  it("retains only a minimally parsed candidate ID from malformed successful create metadata", async () => {
+    const transport = new CaptureTransport();
+    transport.body = new TextEncoder().encode('{"id":"created-file"}');
+    const client = new RawDriveClient("actor-a", new Token(), transport, 1_000);
+    await expect(
+      client.create("probe.md", "root", new TextEncoder().encode("probe")),
+    ).resolves.toMatchObject({
+      status: 200,
+      candidateId: "created-file",
+      malformed: true,
+    });
+  });
 });

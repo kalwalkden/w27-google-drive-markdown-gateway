@@ -17,16 +17,35 @@ interface RequiredCheck {
   readonly method: ProbeCheck["method"];
   readonly expected: ProbeCheck["expected"];
   readonly requiresIfMatch?: boolean;
+  readonly requiresOperationSuccess?: boolean;
   readonly requires412?: boolean;
+  readonly requiresReadback?: boolean;
 }
 
 const requiredChecks: readonly RequiredCheck[] = [
+  {
+    id: "preflight-root",
+    actor: "system",
+    endpoint: "metadata",
+    method: "GET",
+    expected: "marked-test-root",
+    requiresOperationSuccess: true,
+  },
+  {
+    id: "preflight-archive",
+    actor: "system",
+    endpoint: "metadata",
+    method: "GET",
+    expected: "direct-child-archive",
+    requiresOperationSuccess: true,
+  },
   {
     id: "create",
     actor: "actor-a",
     endpoint: "create",
     method: "POST",
     expected: "create-disposable-markdown",
+    requiresOperationSuccess: true,
   },
   {
     id: "create-download",
@@ -34,6 +53,7 @@ const requiredChecks: readonly RequiredCheck[] = [
     endpoint: "download",
     method: "GET",
     expected: "create-download-match",
+    requiresReadback: true,
   },
   {
     id: "actor-b-s0",
@@ -41,6 +61,7 @@ const requiredChecks: readonly RequiredCheck[] = [
     endpoint: "metadata",
     method: "GET",
     expected: "actor-b-s0-match",
+    requiresReadback: true,
   },
   {
     id: "fresh-content-update",
@@ -49,6 +70,8 @@ const requiredChecks: readonly RequiredCheck[] = [
     method: "PATCH",
     expected: "fresh-content-update",
     requiresIfMatch: true,
+    requiresOperationSuccess: true,
+    requiresReadback: true,
   },
   {
     id: "fresh-content-update-second",
@@ -57,6 +80,8 @@ const requiredChecks: readonly RequiredCheck[] = [
     method: "PATCH",
     expected: "second-fresh-content-update",
     requiresIfMatch: true,
+    requiresOperationSuccess: true,
+    requiresReadback: true,
   },
   {
     id: "stale-content-update",
@@ -66,6 +91,7 @@ const requiredChecks: readonly RequiredCheck[] = [
     expected: "stale-content-rejected",
     requiresIfMatch: true,
     requires412: true,
+    requiresReadback: true,
   },
   {
     id: "stale-parent-move",
@@ -75,35 +101,47 @@ const requiredChecks: readonly RequiredCheck[] = [
     expected: "stale-parent-rejected",
     requiresIfMatch: true,
     requires412: true,
+    requiresReadback: true,
   },
 ];
 
 interface ReadbackSnapshot {
   readonly version: string;
   readonly headRevisionId?: string;
+  readonly responseEtag: string;
   readonly opaqueFileRef: string;
   readonly opaqueParentRefs: readonly string[];
   readonly payloadSha256: string;
   readonly payloadByteLength: number;
 }
 
+function is2xx(status: number | undefined): boolean {
+  return status !== undefined && status >= 200 && status < 300;
+}
+
 function readbackSnapshot(check: ProbeCheck): ReadbackSnapshot | undefined {
+  const readback = check.readback;
   if (
-    !check.version ||
-    !/^\d+$/.test(check.version) ||
-    !check.opaqueFileRef ||
-    check.opaqueParentRefs?.length !== 1 ||
-    !check.payloadSha256 ||
-    check.payloadByteLength === undefined
+    !readback ||
+    !is2xx(readback.metadataStatus) ||
+    !is2xx(readback.downloadStatus) ||
+    !readback.version ||
+    !/^\d+$/.test(readback.version) ||
+    !readback.responseEtag ||
+    !readback.opaqueFileRef ||
+    readback.opaqueParentRefs?.length !== 1 ||
+    !readback.payloadSha256 ||
+    readback.payloadByteLength === undefined
   )
     return undefined;
   return {
-    version: check.version,
-    headRevisionId: check.headRevisionId,
-    opaqueFileRef: check.opaqueFileRef,
-    opaqueParentRefs: check.opaqueParentRefs,
-    payloadSha256: check.payloadSha256,
-    payloadByteLength: check.payloadByteLength,
+    version: readback.version,
+    headRevisionId: readback.headRevisionId,
+    responseEtag: readback.responseEtag,
+    opaqueFileRef: readback.opaqueFileRef,
+    opaqueParentRefs: readback.opaqueParentRefs,
+    payloadSha256: readback.payloadSha256,
+    payloadByteLength: readback.payloadByteLength,
   };
 }
 
@@ -114,6 +152,7 @@ function sameReadback(
   return (
     left.version === right.version &&
     left.headRevisionId === right.headRevisionId &&
+    left.responseEtag === right.responseEtag &&
     left.opaqueFileRef === right.opaqueFileRef &&
     left.opaqueParentRefs.length === right.opaqueParentRefs.length &&
     left.opaqueParentRefs.every(
@@ -124,10 +163,6 @@ function sameReadback(
   );
 }
 
-function provesReadback(check: ProbeCheck): boolean {
-  return Boolean(readbackSnapshot(check));
-}
-
 function matchingRequiredCheck(
   checks: readonly ProbeCheck[],
   required: RequiredCheck,
@@ -135,21 +170,22 @@ function matchingRequiredCheck(
   const matching = checks.filter((check) => check.id === required.id);
   if (matching.length !== 1) return undefined;
   const [check] = matching;
-  if (!check) return undefined;
   if (
-    check.actor === required.actor &&
-    check.endpoint === required.endpoint &&
-    check.method === required.method &&
-    check.expected === required.expected &&
-    check.passed &&
-    check.reason === "ok" &&
-    check.supportsAllDrivesSent &&
-    (!required.requiresIfMatch || check.ifMatchSent) &&
-    (!required.requires412 || check.httpStatus === 412) &&
-    (!required.requires412 || provesReadback(check))
+    !check ||
+    check.actor !== required.actor ||
+    check.endpoint !== required.endpoint ||
+    check.method !== required.method ||
+    check.expected !== required.expected ||
+    !check.passed ||
+    check.reason !== "ok" ||
+    !check.supportsAllDrivesSent ||
+    (required.requiresIfMatch && (!check.ifMatchSent || !check.ifMatchEtag)) ||
+    (required.requiresOperationSuccess && !is2xx(check.operationStatus)) ||
+    (required.requires412 && check.operationStatus !== 412) ||
+    (required.requiresReadback && !readbackSnapshot(check))
   )
-    return check;
-  return undefined;
+    return undefined;
+  return check;
 }
 
 function cleanupIsVerified(evidence: LiveDriveEvidence): boolean {
@@ -181,6 +217,7 @@ export function validateAtomicDriveProof(
       evidence.topology !== "my-drive")
   )
     return { valid: false, reason: "evidence-auth-topology-invalid" };
+
   const checks = new Map(
     requiredChecks.map((required) => [
       required.id,
@@ -203,6 +240,7 @@ export function validateAtomicDriveProof(
     !staleParent
   )
     return { valid: false, reason: "evidence-atomic-proof-missing" };
+
   const snapshots = [
     createDownload,
     actorBS0,
@@ -240,6 +278,11 @@ export function validateAtomicDriveProof(
   const monotonicVersions =
     BigInt(s1.version) >= BigInt(s0.version) &&
     BigInt(s2.version) >= BigInt(s1.version);
+  const correctlyBoundIfMatch =
+    freshContent.ifMatchEtag === bS0.responseEtag &&
+    staleContent.ifMatchEtag === s0.responseEtag &&
+    freshContentSecond.ifMatchEtag === s1.responseEtag &&
+    staleParent.ifMatchEtag === s1.responseEtag;
   if (
     !sameReadback(s0, bS0) ||
     !sameReadback(s1, staleContentAfter) ||
@@ -247,6 +290,7 @@ export function validateAtomicDriveProof(
     !stableFileRef ||
     !stableParentRef ||
     !monotonicVersions ||
+    !correctlyBoundIfMatch ||
     s0.payloadSha256 === s1.payloadSha256 ||
     s1.payloadSha256 === s2.payloadSha256
   )

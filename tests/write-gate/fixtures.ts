@@ -11,23 +11,27 @@ const digest = "a".repeat(64);
 const opaque = "b".repeat(64);
 
 function snapshotValues(id: string): {
+  responseEtag: string;
   version: string;
   headRevisionId: string;
   payloadSha256: string;
 } {
   if (id === "fresh-content-update" || id === "stale-content-update")
     return {
+      responseEtag: '"etag-v2"',
       version: "2",
       headRevisionId: "example-head-revision-2",
       payloadSha256: "c".repeat(64),
     };
   if (id === "fresh-content-update-second" || id === "stale-parent-move")
     return {
+      responseEtag: '"etag-v3"',
       version: "3",
       headRevisionId: "example-head-revision-3",
       payloadSha256: "d".repeat(64),
     };
   return {
+    responseEtag: '"etag-v1"',
     version: "1",
     headRevisionId: "example-head-revision-1",
     payloadSha256: digest,
@@ -50,15 +54,26 @@ function successfulCheck(
     endpoint,
     method,
     ifMatchSent,
+    ifMatchEtag:
+      id === "fresh-content-update" || id === "stale-content-update"
+        ? '"etag-v1"'
+        : id === "fresh-content-update-second" || id === "stale-parent-move"
+          ? '"etag-v2"'
+          : undefined,
     supportsAllDrivesSent: true,
-    httpStatus,
-    responseEtag: "example-etag",
-    version: snapshot.version,
-    headRevisionId: snapshot.headRevisionId,
-    opaqueFileRef: opaque,
-    opaqueParentRefs: [opaque],
-    payloadSha256: snapshot.payloadSha256,
-    payloadByteLength: 12,
+    operationStatus: httpStatus,
+    operationEtag: "example-operation-etag",
+    readback: {
+      metadataStatus: 200,
+      downloadStatus: 200,
+      responseEtag: snapshot.responseEtag,
+      version: snapshot.version,
+      headRevisionId: snapshot.headRevisionId,
+      opaqueFileRef: opaque,
+      opaqueParentRefs: [opaque],
+      payloadSha256: snapshot.payloadSha256,
+      payloadByteLength: 12,
+    },
     expected,
     passed: true,
     reason: "ok",
@@ -67,8 +82,8 @@ function successfulCheck(
 
 export function validEvidence(): LiveDriveEvidence {
   return {
-    schemaVersion: 1,
-    probeVersion: "1",
+    schemaVersion: 2,
+    probeVersion: "2",
     runId: "00000000-0000-4000-8000-000000000000",
     startedAt: "2026-01-01T00:00:00.000Z",
     finishedAt: "2026-01-01T00:01:00.000Z",
@@ -76,6 +91,20 @@ export function validEvidence(): LiveDriveEvidence {
     topology: "shared-drive",
     outcome: "SUPPORTED",
     checks: [
+      successfulCheck(
+        "preflight-root",
+        "system",
+        "metadata",
+        "GET",
+        "marked-test-root",
+      ),
+      successfulCheck(
+        "preflight-archive",
+        "system",
+        "metadata",
+        "GET",
+        "direct-child-archive",
+      ),
       successfulCheck(
         "create",
         "actor-a",

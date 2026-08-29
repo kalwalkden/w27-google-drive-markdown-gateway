@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 1,
-  "probeVersion": "1",
+  "schemaVersion": 2,
+  "probeVersion": "2",
   "runId": "00000000-0000-4000-8000-000000000000",
   "startedAt": "2026-01-01T00:00:00.000Z",
   "finishedAt": "2026-01-01T00:00:01.000Z",

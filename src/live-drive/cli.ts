@@ -1,4 +1,4 @@
-import { relative, resolve } from "node:path";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -9,21 +9,13 @@ import {
   loadLiveDriveProbeConfig,
   loadOAuthSecret,
   findRepositoryRoot,
+  assertOutputOutsideRepository,
   parseLiveDriveProbeArgs,
 } from "./config.js";
 import { RawDriveClient } from "./drive-client.js";
 import { writeEvidenceExclusively } from "./evidence.js";
 import { FetchHttpTransport } from "./http.js";
 import { runLiveDriveCapabilityProbe } from "./probe.js";
-
-function outsideRepository(path: string, repositoryRoot: string): boolean {
-  const value = relative(resolve(repositoryRoot), resolve(path));
-  return (
-    Boolean(value) &&
-    (value === ".." ||
-      value.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`))
-  );
-}
 
 export function exitCode(outcome: string, cleanup: string): number {
   if (cleanup === "FAILED") return 14;
@@ -38,8 +30,7 @@ export async function main(
   try {
     const parsed = parseLiveDriveProbeArgs(args);
     const repositoryRoot = await findRepositoryRoot(process.cwd());
-    if (!outsideRepository(parsed.outputPath, repositoryRoot))
-      throw new Error("result output must be outside the repository");
+    await assertOutputOutsideRepository(parsed.outputPath, repositoryRoot);
     const config = await loadLiveDriveProbeConfig(parsed.configPath);
     const tokenProvider =
       config.authMode === "shared-drive-adc"

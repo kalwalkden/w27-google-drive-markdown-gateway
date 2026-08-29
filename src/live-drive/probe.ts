@@ -25,6 +25,8 @@ export interface ProbeClients {
 
 interface InternalSnapshot extends DriveSnapshot {
   contentHash: string;
+  metadataStatus: number;
+  downloadStatus: number;
 }
 
 class ProbeStop extends Error {
@@ -70,33 +72,34 @@ function check(
   response?: DriveResponse<DriveFileMetadata | Uint8Array>,
   snapshot?: InternalSnapshot,
   referenceKey?: Uint8Array,
-  ifMatchSent?: boolean,
+  ifMatchEtag?: string,
 ): ProbeCheck {
   return {
     id,
     actor,
     endpoint: endpointFor(id),
     method,
-    ifMatchSent:
-      ifMatchSent ??
-      (id.includes("stale") || id.includes("fresh") || id.includes("cleanup")),
+    ifMatchSent: Boolean(ifMatchEtag),
+    ifMatchEtag,
     supportsAllDrivesSent: true,
-    httpStatus: response?.status,
-    responseEtag: response?.etag,
-    version: snapshot?.metadata.version,
-    headRevisionId: snapshot?.metadata.headRevisionId,
-    opaqueFileRef:
+    operationStatus: response?.status,
+    operationEtag: response?.etag,
+    readback:
       snapshot && referenceKey
-        ? opaqueReference(referenceKey, snapshot.metadata.id)
+        ? {
+            metadataStatus: snapshot.metadataStatus,
+            downloadStatus: snapshot.downloadStatus,
+            responseEtag: snapshot.etag,
+            version: snapshot.metadata.version,
+            headRevisionId: snapshot.metadata.headRevisionId,
+            opaqueFileRef: opaqueReference(referenceKey, snapshot.metadata.id),
+            opaqueParentRefs: snapshot.metadata.parents.map((parent) =>
+              opaqueReference(referenceKey, parent),
+            ),
+            payloadSha256: snapshot.contentHash,
+            payloadByteLength: snapshot.payload.length,
+          }
         : undefined,
-    opaqueParentRefs:
-      snapshot && referenceKey
-        ? snapshot.metadata.parents.map((parent) =>
-            opaqueReference(referenceKey, parent),
-          )
-        : undefined,
-    payloadSha256: snapshot?.contentHash,
-    payloadByteLength: snapshot?.payload.length,
     expected,
     passed,
     reason,
@@ -138,6 +141,8 @@ async function snapshot(
       etag: response.etag,
       payload: download.value,
       contentHash: digest(download.value),
+      metadataStatus: response.status,
+      downloadStatus: download.status,
     },
   };
 }
@@ -187,8 +192,8 @@ function evidence(
   cleanupReason: EvidenceReasonCode,
 ): LiveDriveEvidence {
   return {
-    schemaVersion: 1,
-    probeVersion: "1",
+    schemaVersion: 2,
+    probeVersion: "2",
     runId,
     startedAt,
     finishedAt,
@@ -291,6 +296,10 @@ export async function runLiveDriveCapabilityProbe(
       config.testRootFolderId,
       versionOne,
     );
+    if (created.status >= 200 && created.status < 300 && created.candidateId) {
+      // Cleanup is now armed even if strict metadata validation cannot continue the proof.
+      fileId = created.candidateId;
+    }
     if (created.status < 200 || created.status >= 300 || !created.value) {
       mark(
         check(
@@ -303,7 +312,11 @@ export async function runLiveDriveCapabilityProbe(
           created,
         ),
       );
-      throw new ProbeStop(failedResponseOutcome(created));
+      throw new ProbeStop(
+        created.status >= 200 && created.status < 300
+          ? "INCONCLUSIVE"
+          : failedResponseOutcome(created),
+      );
     }
     fileId = created.value.id;
     mark(
@@ -466,6 +479,7 @@ export async function runLiveDriveCapabilityProbe(
           freshOne,
           afterOne.value,
           hmacKey,
+          bS0Etag,
         ),
       );
       throw new ProbeStop(failedResponseOutcome(freshOne));
@@ -482,6 +496,9 @@ export async function runLiveDriveCapabilityProbe(
             ? "malformed-metadata"
             : "unreadable-post-state",
           freshOne,
+          undefined,
+          undefined,
+          bS0Etag,
         ),
       );
       throw new ProbeStop("INCONCLUSIVE");
@@ -507,6 +524,7 @@ export async function runLiveDriveCapabilityProbe(
           freshOne,
           afterOne.value,
           hmacKey,
+          bS0Etag,
         ),
       );
       throw new ProbeStop("UNSUPPORTED");
@@ -525,6 +543,7 @@ export async function runLiveDriveCapabilityProbe(
         freshOne,
         s1,
         hmacKey,
+        bS0Etag,
       ),
     );
 
@@ -550,6 +569,7 @@ export async function runLiveDriveCapabilityProbe(
           staleContent,
           staleContentAfter.value,
           hmacKey,
+          s0Etag,
         ),
       );
       throw new ProbeStop(failedResponseOutcome(staleContent));
@@ -566,6 +586,9 @@ export async function runLiveDriveCapabilityProbe(
             ? "malformed-metadata"
             : "unreadable-post-state",
           staleContent,
+          undefined,
+          undefined,
+          s0Etag,
         ),
       );
       throw new ProbeStop("INCONCLUSIVE");
@@ -582,6 +605,7 @@ export async function runLiveDriveCapabilityProbe(
           staleContent,
           staleContentAfter.value,
           hmacKey,
+          s0Etag,
         ),
       );
       throw new ProbeStop("UNSUPPORTED");
@@ -597,6 +621,7 @@ export async function runLiveDriveCapabilityProbe(
         staleContent,
         staleContentAfter.value,
         hmacKey,
+        s0Etag,
       ),
     );
 
@@ -620,6 +645,7 @@ export async function runLiveDriveCapabilityProbe(
           freshTwo,
           afterTwo.value,
           hmacKey,
+          s1Etag,
         ),
       );
       throw new ProbeStop(failedResponseOutcome(freshTwo));
@@ -636,6 +662,9 @@ export async function runLiveDriveCapabilityProbe(
             ? "malformed-metadata"
             : "unreadable-post-state",
           freshTwo,
+          undefined,
+          undefined,
+          s1Etag,
         ),
       );
       throw new ProbeStop("INCONCLUSIVE");
@@ -661,6 +690,7 @@ export async function runLiveDriveCapabilityProbe(
           freshTwo,
           afterTwo.value,
           hmacKey,
+          s1Etag,
         ),
       );
       throw new ProbeStop("UNSUPPORTED");
@@ -677,6 +707,7 @@ export async function runLiveDriveCapabilityProbe(
         freshTwo,
         s2,
         hmacKey,
+        s1Etag,
       ),
     );
 
@@ -703,6 +734,7 @@ export async function runLiveDriveCapabilityProbe(
           staleMove,
           staleMoveAfter.value,
           hmacKey,
+          s1Etag,
         ),
       );
       throw new ProbeStop(failedResponseOutcome(staleMove));
@@ -719,6 +751,9 @@ export async function runLiveDriveCapabilityProbe(
             ? "malformed-metadata"
             : "unreadable-post-state",
           staleMove,
+          undefined,
+          undefined,
+          s1Etag,
         ),
       );
       throw new ProbeStop("INCONCLUSIVE");
@@ -738,6 +773,7 @@ export async function runLiveDriveCapabilityProbe(
           staleMove,
           staleMoveAfter.value,
           hmacKey,
+          s1Etag,
         ),
       );
       throw new ProbeStop("UNSUPPORTED");
@@ -753,6 +789,7 @@ export async function runLiveDriveCapabilityProbe(
         staleMove,
         staleMoveAfter.value,
         hmacKey,
+        s1Etag,
       ),
     );
     outcome = "SUPPORTED";
@@ -824,7 +861,7 @@ export async function runLiveDriveCapabilityProbe(
                 moved,
                 current.value,
                 hmacKey,
-                true,
+                current.value.etag,
               ),
             );
             usedUnconditionalFallback = true;
@@ -857,7 +894,7 @@ export async function runLiveDriveCapabilityProbe(
               moved,
               verified.value,
               hmacKey,
-              !usedUnconditionalFallback,
+              usedUnconditionalFallback ? undefined : current.value.etag,
             ),
           );
         } else {

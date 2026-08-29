@@ -1,10 +1,18 @@
-import { chmod, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  realpath,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import {
+  assertOutputOutsideRepository,
   findRepositoryRoot,
   liveConfirmation,
   loadOAuthSecret,
@@ -73,6 +81,35 @@ describe("live probe configuration", () => {
     await expect(
       loadOAuthSecret(join(root, "oauth.json"), root),
     ).rejects.toThrow();
+
+    const repositorySecret = join(root, "repository-oauth.json");
+    await writeFile(
+      repositorySecret,
+      '{"clientId":"id","clientSecret":"secret","refreshToken":"token"}',
+    );
+    await chmod(repositorySecret, 0o600);
+    const escapedAncestor = join(outside, "back-into-repository");
+    await symlink(root, escapedAncestor);
+    await expect(
+      loadOAuthSecret(join(escapedAncestor, "repository-oauth.json"), root),
+    ).rejects.toThrow();
+  });
+
+  it("rejects output paths whose existing ancestor symlink resolves into the repository", async () => {
+    const root = await mkdtemp(join(tmpdir(), "w27-drive-root-"));
+    const outside = await mkdtemp(join(tmpdir(), "w27-drive-output-"));
+    await mkdir(join(root, "evidence"));
+    await expect(
+      assertOutputOutsideRepository(join(outside, "result.json"), root),
+    ).resolves.toBeUndefined();
+    const escapedAncestor = join(outside, "back-into-repository");
+    await symlink(root, escapedAncestor);
+    await expect(
+      assertOutputOutsideRepository(
+        join(escapedAncestor, "evidence", "result.json"),
+        root,
+      ),
+    ).rejects.toThrow();
   });
 
   it("finds the project root from a nested invocation directory", async () => {
@@ -83,6 +120,8 @@ describe("live probe configuration", () => {
     );
     await writeFile(join(root, "package.json"), "{}");
     await writeFile(join(root, "AGENTS.md"), "# test\n");
-    await expect(findRepositoryRoot(nested)).resolves.toBe(root);
+    await expect(findRepositoryRoot(nested)).resolves.toBe(
+      await realpath(root),
+    );
   });
 });
