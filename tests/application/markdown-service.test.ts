@@ -768,6 +768,28 @@ describe("MarkdownService", () => {
       "UNSUPPORTED",
     );
 
+    drive.addFixture({
+      id: "same-left",
+      name: "same.md",
+      kind: "file",
+      parentIds: ["root"],
+      content: "left",
+    });
+    drive.addFixture({
+      id: "same-right",
+      name: "same.md",
+      kind: "file",
+      parentIds: ["root"],
+      content: "right",
+    });
+    await expect(
+      drive.searchDirectChildren(folderId("root"), "same", 1),
+    ).resolves.toHaveLength(2);
+    await expectCode(
+      () => directService.searchMarkdown({ query: "same", limit: 1 }),
+      "AMBIGUOUS_PATH",
+    );
+
     const guide = drive.inspect("root-file") as DriveNode;
     const duplicateListService = new MarkdownService(
       portFrom(drive, { listChildren: async () => [guide, guide] }),

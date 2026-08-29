@@ -142,7 +142,7 @@ describe("runtime composition", () => {
 
     if (!service) throw new Error("runtime did not compose a service");
     await expect(service.listMarkdown()).resolves.toEqual([]);
-    expect(listOptions).toEqual([{ limit: 3, overflowSentinel: true }]);
+    expect(listOptions).toEqual([{ limit: 3, overflowSignal: true }]);
   });
 
   it("loads a bounded OAuth file only for My Drive before composing its adapter", async () => {

@@ -23,23 +23,31 @@ export interface DriveSearchHit {
   readonly excerpt?: string;
 }
 
+/** A bounded list found the caller-requested extra child without exposing it. */
+export class DriveListOverflowError extends Error {
+  constructor() {
+    super("Drive child list reached its overflow sentinel.");
+    this.name = "DriveListOverflowError";
+  }
+}
+
 /** A hard bound for a single child enumeration. */
 export interface DriveListOptions {
   readonly limit: number;
   /**
-   * Requests one unverified final child solely as an overflow sentinel. A
-   * caller that sets this must reject a result whose length reaches `limit`
-   * before inspecting or exposing any returned child.
+   * Requests a completion signal at the first raw child that reaches `limit`.
+   * The provider must throw DriveListOverflowError without parsing, fetching,
+   * or returning that child.
    */
-  readonly overflowSentinel?: boolean;
+  readonly overflowSignal?: boolean;
 }
 
 /** Facts used by MarkdownService to resolve and verify documents. */
 export interface DriveReadPort {
   getNode(id: FileId | FolderId): Promise<DriveNode | undefined>;
   /**
-   * Providers fail closed if the bound would omit a child. The optional
-   * overflow sentinel is the only exception and must never be consumed.
+   * Providers fail closed if the bound would omit a child. With overflowSignal
+   * they throw before the final raw child is consumed.
    */
   listChildren(
     folderId: FolderId,

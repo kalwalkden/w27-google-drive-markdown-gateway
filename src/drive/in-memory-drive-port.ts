@@ -7,6 +7,7 @@ import {
   revision,
   utf8ByteSize,
 } from "../domain/markdown.js";
+import { DriveListOverflowError } from "./drive-port.js";
 import type {
   ConditionalWriteResult,
   CreateWriteResult,
@@ -86,6 +87,13 @@ export class InMemoryDrivePort implements DriveReadPort, RawDriveWritePort {
     const children = [...this.nodes.values()].filter((node) =>
       node.parentIds.includes(folder),
     );
+    if (
+      options?.overflowSignal === true &&
+      limit !== undefined &&
+      children.length >= limit
+    ) {
+      throw new DriveListOverflowError();
+    }
     return (limit === undefined ? children : children.slice(0, limit)).map(
       (node) => this.snapshot(node),
     );
@@ -117,7 +125,7 @@ export class InMemoryDrivePort implements DriveReadPort, RawDriveWritePort {
   async searchDirectChildren(
     folder: FolderId,
     query: string,
-    limit: number,
+    _limit: number,
   ): Promise<readonly DriveSearchHit[]> {
     const candidates = await this.listChildren(folder);
     const needle = query.toLowerCase();
@@ -129,7 +137,6 @@ export class InMemoryDrivePort implements DriveReadPort, RawDriveWritePort {
           content.toLowerCase().includes(needle)
         );
       })
-      .slice(0, limit)
       .map((node) => {
         const content = this.nodes.get(node.id)?.content;
         const index = content?.toLowerCase().indexOf(needle) ?? -1;

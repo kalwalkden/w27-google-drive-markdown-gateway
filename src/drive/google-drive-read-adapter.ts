@@ -7,6 +7,7 @@ import {
   isWellFormedUtf16,
   revision,
 } from "../domain/markdown.js";
+import { DriveListOverflowError } from "./drive-port.js";
 import type {
   DriveListOptions,
   DriveNode,
@@ -110,8 +111,8 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
     if (!Number.isSafeInteger(limit) || limit < 1)
       throw new GoogleDriveProviderError("configuration", "list-children");
     const enumerationLimit = Math.min(limit, this.maxTraversalNodes);
-    const overflowSentinel =
-      options?.overflowSentinel === true && enumerationLimit === limit;
+    const overflowSignal =
+      options?.overflowSignal === true && enumerationLimit === limit;
     const root = await this.ensureRoot();
     const result: DriveNode[] = [];
     let pageToken: string | undefined;
@@ -136,14 +137,15 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
       pages += 1;
       const page = parseListResource(data, "list-children");
       const remaining = enumerationLimit - result.length;
+      if (
+        overflowSignal &&
+        result.length + page.files.length >= enumerationLimit
+      )
+        throw new DriveListOverflowError();
       if (page.files.length > remaining)
         throw new GoogleDriveProviderError("limit", "list-children");
       for (const resource of page.files) {
         const candidate = normalizeNode(resource, "list-children");
-        if (overflowSentinel && result.length === enumerationLimit - 1) {
-          result.push(candidate);
-          continue;
-        }
         if (candidate.kind !== "file") {
           result.push(candidate);
           continue;
@@ -225,7 +227,6 @@ export class GoogleDriveReadAdapter implements DriveReadPort {
     const needle = query.toLocaleLowerCase();
     const result: DriveSearchHit[] = [];
     for (const candidate of candidates) {
-      if (result.length >= limit) break;
       const nameMatch = candidate.name.toLocaleLowerCase().includes(needle);
       if (nameMatch) {
         result.push({ node: candidate });

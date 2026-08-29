@@ -156,7 +156,7 @@ describe("GoogleDriveReadAdapter", () => {
     expect(api.gets.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("returns one unverified final child only for an explicit overflow sentinel", async () => {
+  it("signals an opaque overflow before parsing or fetching the final raw child", async () => {
     const api = new FakeDriveApi();
     api.resources.set("root", folder("root", "root"));
     api.resources.set("one", file("one", "one.md", ["root"], "one"));
@@ -167,19 +167,15 @@ describe("GoogleDriveReadAdapter", () => {
         api.resources.get("one") as Resource,
         api.resources.get("two") as Resource,
       ],
-      [api.resources.get("three") as Resource],
+      [{ ...(api.resources.get("three") as Resource), id: "\ud800" }],
     ]);
 
     await expect(
       adapter(api).listChildren(folderId("root"), {
         limit: 3,
-        overflowSentinel: true,
+        overflowSignal: true,
       }),
-    ).resolves.toMatchObject([
-      { id: fileId("one") },
-      { id: fileId("two") },
-      { id: fileId("three") },
-    ]);
+    ).rejects.toMatchObject({ name: "DriveListOverflowError" });
     expect(api.lists).toHaveLength(2);
     expect(api.lists[0]).toMatchObject({ pageSize: 3 });
     expect(api.gets.map((request) => request.fileId)).toEqual([
@@ -187,6 +183,16 @@ describe("GoogleDriveReadAdapter", () => {
       "one",
       "two",
     ]);
+
+    const service = new MarkdownService(adapter(api), {
+      rootFolderId: folderId("root"),
+      archiveFolderId: folderId("archive"),
+      maxListResults: 2,
+    });
+    await expect(service.listMarkdown()).rejects.toMatchObject({
+      code: "RESULT_LIMIT",
+    });
+    expect(api.gets.map((request) => request.fileId)).not.toContain("\ud800");
   });
 
   it("accepts an exact complete page at the enumeration limit", async () => {
@@ -369,6 +375,25 @@ describe("GoogleDriveReadAdapter", () => {
     expect(
       api.lists.every((request) => !String(request.q).includes("fullText")),
     ).toBe(true);
+  });
+
+  it("returns every matching direct child before the service applies its caller limit", async () => {
+    const api = new FakeDriveApi();
+    api.resources.set("root", folder("root", "root"));
+    api.resources.set("left", file("left", "same.md", ["root"], "left"));
+    api.resources.set("right", file("right", "same.md", ["root"], "right"));
+    const drive = adapter(api);
+
+    await expect(
+      drive.searchDirectChildren(folderId("root"), "same", 1),
+    ).resolves.toHaveLength(2);
+    const service = new MarkdownService(drive, {
+      rootFolderId: folderId("root"),
+      archiveFolderId: folderId("archive"),
+    });
+    await expect(
+      service.searchMarkdown({ query: "same", limit: 1 }),
+    ).rejects.toMatchObject({ code: "AMBIGUOUS_PATH" });
   });
 
   it("gets metadata before bounded fatal-UTF-8 media and never exposes provider payloads", async () => {

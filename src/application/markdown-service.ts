@@ -25,6 +25,7 @@ import {
   type UpdateMarkdownResult,
   utf8ByteSize,
 } from "../domain/markdown.js";
+import { DriveListOverflowError } from "../drive/drive-port.js";
 import type {
   ConditionalWriteResult,
   CreateWriteResult,
@@ -143,16 +144,18 @@ export class MarkdownService {
       );
     }
     this.requireDirectRootRead(input.path, recursive);
-    const candidates = await this.port.listChildren(this.config.rootFolderId, {
-      limit: this.maxListResults + 1,
-      overflowSentinel: true,
-    });
+    let candidates: readonly DriveNode[];
+    try {
+      candidates = await this.port.listChildren(this.config.rootFolderId, {
+        limit: this.maxListResults + 1,
+        overflowSignal: true,
+      });
+    } catch (error) {
+      if (error instanceof DriveListOverflowError) this.throwResultLimit();
+      throw error;
+    }
     if (candidates.length > this.maxListResults) {
-      throw new MarkdownGatewayError(
-        "RESULT_LIMIT",
-        "Markdown list exceeds the configured result limit.",
-        { maxResults: this.maxListResults },
-      );
+      this.throwResultLimit();
     }
     const result: MarkdownFileMetadata[] = [];
     const paths = new Set<string>();
@@ -341,6 +344,14 @@ export class MarkdownService {
     throw new MarkdownGatewayError(
       "UNSUPPORTED",
       "Nested or recursive reads are unavailable without atomic topology proof.",
+    );
+  }
+
+  private throwResultLimit(): never {
+    throw new MarkdownGatewayError(
+      "RESULT_LIMIT",
+      "Markdown list exceeds the configured result limit.",
+      { maxResults: this.maxListResults },
     );
   }
 
