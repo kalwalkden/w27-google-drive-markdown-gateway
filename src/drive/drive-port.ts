@@ -96,10 +96,14 @@ export interface DriveReadPort {
 export type ConditionalWriteResult =
   | { readonly outcome: "success"; readonly node: DriveNode }
   | { readonly outcome: "conflict"; readonly current?: DriveNode }
+  /** The request may have reached Drive, but its final state cannot be proved. */
+  | { readonly outcome: "unknown" }
   | { readonly outcome: "unsupported" };
 
 export type CreateWriteResult =
   | { readonly outcome: "success"; readonly node: DriveNode }
+  /** The request may have reached Drive, but its final state cannot be proved. */
+  | { readonly outcome: "unknown" }
   | { readonly outcome: "unsupported" };
 
 /** Provider-facing operations that accept only verified IDs and opaque revisions. */

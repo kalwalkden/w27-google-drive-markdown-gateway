@@ -16,6 +16,7 @@ export type ErrorCode =
   | "FILE_TOO_LARGE"
   | "RESULT_LIMIT"
   | "CONFLICT"
+  | "OUTCOME_UNKNOWN"
   | "INVALID_ARCHIVE"
   | "UNSUPPORTED";
 

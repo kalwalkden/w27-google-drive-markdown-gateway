@@ -112,4 +112,19 @@ describe("audit allowlist", () => {
       expect(JSON.stringify({ audit, metrics })).not.toContain(value);
     }
   });
+
+  it("allows outcome_unknown as a terminal result without extra labels", () => {
+    const metric: MarkdownMetricObservation = {
+      metric: "gateway_http_requests_total",
+      operation: "archive_markdown",
+      principalKind: "codex",
+      result: "outcome_unknown",
+    };
+    expect(Object.keys(metric).sort()).toEqual([
+      "metric",
+      "operation",
+      "principalKind",
+      "result",
+    ]);
+  });
 });

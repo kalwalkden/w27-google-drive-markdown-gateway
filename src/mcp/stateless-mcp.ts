@@ -86,6 +86,7 @@ type PublicErrorCode =
   | "NOT_FOUND"
   | "AMBIGUOUS_PATH"
   | "CONFLICT"
+  | "OUTCOME_UNKNOWN"
   | "UNSUPPORTED"
   | "UPSTREAM_UNAVAILABLE"
   | "INTERNAL";
@@ -138,6 +139,7 @@ const publicErrorSchema = z
       "NOT_FOUND",
       "AMBIGUOUS_PATH",
       "CONFLICT",
+      "OUTCOME_UNKNOWN",
       "UNSUPPORTED",
       "UPSTREAM_UNAVAILABLE",
       "INTERNAL",
@@ -493,6 +495,12 @@ function publicToolError(error: unknown): PublicToolError {
           message:
             "Markdown revision conflict. Read the document again before retrying.",
         };
+      case "OUTCOME_UNKNOWN":
+        return {
+          code: error.code,
+          message:
+            "Mutation outcome is unknown. Read the document again before any further mutation.",
+        };
       case "UNSUPPORTED":
         return { code: error.code, message: publicErrorMessage };
     }
@@ -532,6 +540,8 @@ function auditResultForToolError(error: unknown): Readonly<{
         return { result: "ambiguous_path" };
       case "CONFLICT":
         return { result: "conflict" };
+      case "OUTCOME_UNKNOWN":
+        return { result: "outcome_unknown" };
       case "UNSUPPORTED":
         return { result: "unsupported" };
     }

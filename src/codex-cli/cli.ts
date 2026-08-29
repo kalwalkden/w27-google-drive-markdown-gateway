@@ -455,6 +455,13 @@ const errorPairs = new Map<string, readonly [number, string]>([
   ["NOT_FOUND", [404, "Markdown file was not found."]],
   ["AMBIGUOUS_PATH", [409, "Markdown path is ambiguous."]],
   ["CONFLICT", [409, "Markdown revision conflict."]],
+  [
+    "OUTCOME_UNKNOWN",
+    [
+      503,
+      "Mutation outcome is unknown. Read the document again before any further mutation.",
+    ],
+  ],
   ["UNSUPPORTED", [503, "Operation is unavailable."]],
   ["RATE_LIMITED", [429, "Request rate limit exceeded."]],
   ["REQUEST_TIMEOUT", [504, "Request timed out."]],
@@ -576,7 +583,8 @@ function output(
       status,
       operationId: record.operationId,
       error: { code: error.code, message: error.message },
-      ...(error.code === "CONFLICT" && locator
+      ...((error.code === "CONFLICT" || error.code === "OUTCOME_UNKNOWN") &&
+      locator
         ? { recovery: { action: "read", locator } }
         : {}),
     };
@@ -642,7 +650,9 @@ export async function main(
       ? 6
       : result.error.code === "CONFLICT"
         ? 8
-        : 7;
+        : result.error.code === "OUTCOME_UNKNOWN"
+          ? 9
+          : 7;
   } catch (error) {
     const code: CliFailure =
       error instanceof Error &&

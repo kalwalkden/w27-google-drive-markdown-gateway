@@ -104,6 +104,7 @@ interface PublicFailure {
     | "NOT_FOUND"
     | "AMBIGUOUS_PATH"
     | "CONFLICT"
+    | "OUTCOME_UNKNOWN"
     | "UNSUPPORTED"
     | "RATE_LIMITED"
     | "REQUEST_TIMEOUT"
@@ -293,6 +294,13 @@ function publicFailure(error: unknown): PublicFailure {
           error.code,
           "Markdown revision conflict.",
           "conflict",
+        );
+      case "OUTCOME_UNKNOWN":
+        return failure(
+          503,
+          error.code,
+          "Mutation outcome is unknown. Read the document again before any further mutation.",
+          "outcome_unknown",
         );
       case "UNSUPPORTED":
         return failure(

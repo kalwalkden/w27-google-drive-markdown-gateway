@@ -390,6 +390,34 @@ describe("md-drive", () => {
     expect(calls).toBe(1);
   });
 
+  it("classifies an unknown mutation once and requires a caller-locator reread", async () => {
+    let calls = 0;
+    const result = run(
+      ["archive", "--path", "docs/example.md", "--revision", "one"],
+      async () => {
+        calls += 1;
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            operationId: "operation",
+            error: {
+              code: "OUTCOME_UNKNOWN",
+              message:
+                "Mutation outcome is unknown. Read the document again before any further mutation.",
+            },
+          }),
+          { status: 503 },
+        );
+      },
+    );
+    await expect(result.code).resolves.toBe(9);
+    expect(JSON.parse(result.stdout[0])).toMatchObject({
+      error: { code: "OUTCOME_UNKNOWN" },
+      recovery: { action: "read", locator: { path: "docs/example.md" } },
+    });
+    expect(calls).toBe(1);
+  });
+
   it("uses the create caller path as conflict recovery locator", async () => {
     const directory = await mkdtemp(
       join(tmpdir(), "md-drive-create-conflict-"),

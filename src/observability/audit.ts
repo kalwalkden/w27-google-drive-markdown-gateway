@@ -25,6 +25,7 @@ export type MarkdownApiAuditResult =
   | "not_found"
   | "ambiguous_path"
   | "conflict"
+  | "outcome_unknown"
   | "unsupported"
   | "rate_limited"
   | "timeout"

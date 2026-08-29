@@ -558,6 +558,11 @@ describe("JSON API", () => {
         "CONFLICT",
       ],
       [
+        new MarkdownGatewayError("OUTCOME_UNKNOWN", "provider timeout detail"),
+        503,
+        "OUTCOME_UNKNOWN",
+      ],
+      [
         new MarkdownGatewayError("UNSUPPORTED", "lease detail"),
         503,
         "UNSUPPORTED",

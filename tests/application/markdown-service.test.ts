@@ -350,34 +350,36 @@ describe("MarkdownService", () => {
     );
   });
 
-  it("creates and conditionally updates direct-root files", async () => {
+  it("creates, conditionally updates, and archives nested files", async () => {
     const { drive, session } = fixture();
     const created = await session.createMarkdown({
-      path: "new.md",
+      path: "docs/new.md",
       content: "é",
     });
-    expect(created.relativePath).toBe("new.md");
+    expect(created.relativePath).toBe("docs/new.md");
     const updated = await session.updateMarkdown({
       fileId: created.fileId,
       expectedRevision: created.revision,
       content: "new",
     });
     expect(updated.revision).toBe(revision("fake-revision-000001"));
-    await expectCode(
-      () =>
-        session.archiveMarkdown({
-          fileId: created.fileId,
-          expectedRevision: updated.revision,
-        }),
-      "UNSUPPORTED",
-    );
+    const archived = await session.archiveMarkdown({
+      fileId: created.fileId,
+      expectedRevision: updated.revision,
+    });
+    expect(archived.relativePath).toBe("archive/new.md");
+    const alreadyArchived = await session.archiveMarkdown({
+      fileId: created.fileId,
+      expectedRevision: archived.revision,
+    });
+    expect(alreadyArchived).toEqual(archived);
     expect(drive.inspect(created.fileId)).toMatchObject({
-      parentIds: [folderId("root")],
+      parentIds: [folderId("archive")],
       content: "new",
     });
   });
 
-  it("does not mutate fake state when an update is stale or archive is disabled", async () => {
+  it("does not mutate fake state when an update or archive revision is stale", async () => {
     const { drive, session } = fixture();
     const before = drive.inspect("root-file");
     await expectCode(
@@ -395,7 +397,7 @@ describe("MarkdownService", () => {
           path: "root-file.md",
           expectedRevision: revision("0"),
         }),
-      "UNSUPPORTED",
+      "CONFLICT",
     );
     expect(drive.inspect("root-file")).toEqual(before);
   });
@@ -447,24 +449,39 @@ describe("MarkdownService", () => {
     expect(drive.inspect("root-file")).toEqual(afterMove);
   });
 
-  it("does not dispatch nested mutations after a non-atomic ancestor resolution", async () => {
-    const { service } = fixture();
+  it("rechecks nested topology before dispatch", async () => {
+    const { drive } = fixture();
+    let createCalls = 0;
+    const raw: RawDriveWritePort = {
+      createFile: async (parent, name, content) => {
+        createCalls += 1;
+        return drive.createFile(parent, name, content);
+      },
+      updateFile: drive.updateFile.bind(drive),
+      moveFile: drive.moveFile.bind(drive),
+    };
+    let listCalls = 0;
+    const service = new MarkdownService(
+      portFrom(drive, {
+        listChildren: async (folder) => {
+          const children = await drive.listChildren(folder);
+          if (folder === folderId("docs") && ++listCalls === 2) {
+            drive.setFixtureParents("docs", ["archive"]);
+          }
+          return children;
+        },
+      }),
+      { rootFolderId: folderId("root"), archiveFolderId: folderId("archive") },
+      writerFrom(raw),
+    );
     await expectCode(
       () =>
         service
           .openWriteSession()
           .createMarkdown({ path: "docs/new.md", content: "x" }),
-      "UNSUPPORTED",
+      "CONFLICT",
     );
-    await expectCode(
-      () =>
-        service.openWriteSession().updateMarkdown({
-          path: "docs/guide.md",
-          expectedRevision: revision("1"),
-          content: "x",
-        }),
-      "UNSUPPORTED",
-    );
+    expect(createCalls).toBe(0);
   });
 
   it("rejects unsafe local inputs before any port call", async () => {
@@ -594,7 +611,7 @@ describe("MarkdownService", () => {
           path: "root-file.md",
           expectedRevision: revision("1"),
         }),
-      "UNSUPPORTED",
+      "OUTSIDE_ROOT",
     );
   });
 
@@ -996,7 +1013,7 @@ describe("MarkdownService", () => {
     ).openWriteSession();
     await expectCode(
       () => createService.createMarkdown({ path: "new.md", content: "new" }),
-      "UNSUPPORTED",
+      "OUTCOME_UNKNOWN",
     );
 
     const updateService = new MarkdownService(
@@ -1022,7 +1039,7 @@ describe("MarkdownService", () => {
           expectedRevision: revision("1"),
           content: "new",
         }),
-      "UNSUPPORTED",
+      "OUTCOME_UNKNOWN",
     );
 
     const archiveResponseService = new MarkdownService(
@@ -1048,7 +1065,7 @@ describe("MarkdownService", () => {
           path: "root-file.md",
           expectedRevision: revision("1"),
         }),
-      "UNSUPPORTED",
+      "OUTCOME_UNKNOWN",
     );
 
     drive.addFixture({
@@ -1069,7 +1086,7 @@ describe("MarkdownService", () => {
           path: "root-file.md",
           expectedRevision: revision("1"),
         }),
-      "UNSUPPORTED",
+      "INVALID_PATH",
     );
   });
 

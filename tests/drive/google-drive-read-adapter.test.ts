@@ -333,7 +333,7 @@ describe("GoogleDriveReadAdapter", () => {
       service
         .openWriteSession()
         .createMarkdown({ path: "new.md", content: "new" }),
-    ).rejects.toMatchObject({ failure: "limit", operation: "list-children" });
+    ).rejects.toMatchObject({ code: "RESULT_LIMIT" });
   });
 
   it("uses the validated Shared Drive corpus and rejects a root topology mismatch", async () => {

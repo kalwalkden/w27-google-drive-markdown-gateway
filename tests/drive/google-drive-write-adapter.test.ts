@@ -115,7 +115,7 @@ describe("GoogleDriveWriteAdapter", () => {
     };
     await expect(
       adapter.updateFile(fileId("file"), revision('"old"'), "hey"),
-    ).resolves.toEqual({ outcome: "unsupported" });
+    ).resolves.toEqual({ outcome: "unknown" });
     expect(http.requests).toHaveLength(2);
   });
 
@@ -134,7 +134,7 @@ describe("GoogleDriveWriteAdapter", () => {
         revision('"old"'),
         "hey",
       ),
-    ).resolves.toEqual({ outcome: "unsupported" });
+    ).resolves.toEqual({ outcome: "unknown" });
     expect(sends).toBe(1);
     expect(http.requests).toHaveLength(1);
   });
@@ -152,7 +152,7 @@ describe("GoogleDriveWriteAdapter", () => {
         "new.md",
         "hey",
       ),
-    ).resolves.toEqual({ outcome: "unsupported" });
+    ).resolves.toEqual({ outcome: "unknown" });
   });
 
   it("rejects malformed request or response ETags without a mutation", async () => {
@@ -169,7 +169,7 @@ describe("GoogleDriveWriteAdapter", () => {
     };
     await expect(
       adapter.createFile(folderId("docs"), "new.md", "hey"),
-    ).resolves.toEqual({ outcome: "unsupported" });
+    ).resolves.toEqual({ outcome: "unknown" });
   });
 
   it("refuses unpaired UTF-16 content before constructing an upload", async () => {
@@ -200,7 +200,7 @@ describe("GoogleDriveWriteAdapter", () => {
     };
     await expect(
       adapter.createFile(folderId("docs"), "new.md", "hey"),
-    ).resolves.toEqual({ outcome: "unsupported" });
+    ).resolves.toEqual({ outcome: "unknown" });
     expect(http.requests).toHaveLength(1);
   });
 
@@ -231,6 +231,6 @@ describe("GoogleDriveWriteAdapter", () => {
     };
     await expect(
       adapter.createFile(folderId("docs"), "new.md", "hey"),
-    ).resolves.toEqual({ outcome: "unsupported" });
+    ).resolves.toEqual({ outcome: "unknown" });
   });
 });

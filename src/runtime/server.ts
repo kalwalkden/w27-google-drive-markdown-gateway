@@ -126,8 +126,8 @@ function driveAuthConfig(
 
 /**
  * Creates the JSON and Work MCP APIs only after bounded configuration parsing.
- * It leaves write sessions absent, so both transports retain default-disabled
- * write behavior.
+ * A write session exists only in the explicit deployment-enabled branch and
+ * is shared by both authenticated transports.
  */
 export async function composeRuntime(
   configJson: unknown,
@@ -175,6 +175,13 @@ export async function composeRuntime(
     },
     writer,
   );
+  const writeSession = config.write.enabled
+    ? service.openWriteSession()
+    : undefined;
+  const writeSessionProvider =
+    writeSession === undefined
+      ? undefined
+      : Object.freeze({ getWriteSession: () => writeSession });
   const principalVerifier = (
     dependencies.createVerifier ?? createPrincipalVerifier
   )(config);
@@ -182,7 +189,7 @@ export async function composeRuntime(
     config,
     service,
     principalVerifier,
-    writeSessionProvider: undefined,
+    writeSessionProvider,
     ...(dependencies.metricRecorder === undefined
       ? {}
       : { metricRecorder: dependencies.metricRecorder }),
@@ -199,7 +206,7 @@ export async function composeRuntime(
       config,
       service,
       principalVerifier,
-      writeSessionProvider: undefined,
+      writeSessionProvider,
       ...(dependencies.metricRecorder === undefined
         ? {}
         : { metricRecorder: dependencies.metricRecorder }),

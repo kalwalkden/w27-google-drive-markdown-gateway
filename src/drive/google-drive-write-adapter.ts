@@ -80,7 +80,7 @@ export class GoogleDriveWriteAdapter implements RawDriveWritePort {
       },
       body,
     });
-    return createResult(response);
+    return response ? createResult(response) : { outcome: "unknown" };
   }
 
   async updateFile(
@@ -108,7 +108,7 @@ export class GoogleDriveWriteAdapter implements RawDriveWritePort {
       },
       body: new TextEncoder().encode(content),
     });
-    return conditionalResult(response);
+    return response ? conditionalResult(response) : { outcome: "unknown" };
   }
 
   async moveFile(
@@ -138,16 +138,18 @@ export class GoogleDriveWriteAdapter implements RawDriveWritePort {
       },
       body: new TextEncoder().encode("{}"),
     });
-    return conditionalResult(response);
+    return response ? conditionalResult(response) : { outcome: "unknown" };
   }
 
   private async send(
     request: GoogleDriveRawHttpRequest,
-  ): Promise<GoogleDriveRawHttpResponse> {
+  ): Promise<GoogleDriveRawHttpResponse | undefined> {
     try {
       return await this.http.send(request);
     } catch {
-      return { status: 0, headers: new Headers(), body: new Uint8Array() };
+      // Once send starts, a timeout or transport exception cannot prove Drive
+      // did not receive the mutation request.
+      return undefined;
     }
   }
 
@@ -193,9 +195,9 @@ function multipartBody(
 
 function createResult(response: GoogleDriveRawHttpResponse): CreateWriteResult {
   if (response.status < 200 || response.status >= 300)
-    return { outcome: "unsupported" };
+    return { outcome: "unknown" };
   const node = responseNode(response);
-  return node ? { outcome: "success", node } : { outcome: "unsupported" };
+  return node ? { outcome: "success", node } : { outcome: "unknown" };
 }
 
 function conditionalResult(
@@ -203,9 +205,9 @@ function conditionalResult(
 ): ConditionalWriteResult {
   if (response.status === 412) return { outcome: "conflict" };
   if (response.status < 200 || response.status >= 300)
-    return { outcome: "unsupported" };
+    return { outcome: "unknown" };
   const node = responseNode(response);
-  return node ? { outcome: "success", node } : { outcome: "unsupported" };
+  return node ? { outcome: "success", node } : { outcome: "unknown" };
 }
 
 function responseNode(

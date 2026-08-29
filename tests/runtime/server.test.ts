@@ -126,6 +126,7 @@ describe("runtime composition", () => {
     let writeAuthCalls = 0;
     let writeAdapterCalls = 0;
     let apiWriteSession: unknown;
+    let mcpWriteSession: unknown;
     await composeRuntime(JSON.stringify(parsed), {
       ...runtimeDependencies([]),
       createWriteRawHttp: (auth) => {
@@ -160,13 +161,14 @@ describe("runtime composition", () => {
         return express();
       },
       createMcpApp: (dependencies) => {
-        expect(dependencies.writeSessionProvider).toBeUndefined();
+        mcpWriteSession = dependencies.writeSessionProvider;
         return express();
       },
     });
     expect(writeAuthCalls).toBe(1);
     expect(writeAdapterCalls).toBe(1);
-    expect(apiWriteSession).toBeUndefined();
+    expect(apiWriteSession).toBeDefined();
+    expect(apiWriteSession).toBe(mcpWriteSession);
   });
 
   it("does not invoke write factories when write mode is absent or disabled", async () => {

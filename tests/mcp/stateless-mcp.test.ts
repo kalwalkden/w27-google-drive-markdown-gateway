@@ -866,7 +866,10 @@ describe("stateless MCP adapter", () => {
             throw new MarkdownGatewayError("CONFLICT", "SENTINEL-REVISION");
           },
           async archiveMarkdown() {
-            return metadata;
+            throw new MarkdownGatewayError(
+              "OUTCOME_UNKNOWN",
+              "SENTINEL-PROVIDER-DETAIL",
+            );
           },
         }),
       },
@@ -907,6 +910,19 @@ describe("stateless MCP adapter", () => {
       });
       expect(JSON.stringify(conflict)).not.toContain("SENTINEL-REVISION");
       expect(updates).toBe(1);
+      const unknown = await client.callTool({
+        name: "archive_markdown",
+        arguments: { fileId: "guide-file", expectedRevision: "one" },
+      });
+      expect(structured(unknown)).toEqual({
+        ok: false,
+        error: {
+          code: "OUTCOME_UNKNOWN",
+          message:
+            "Mutation outcome is unknown. Read the document again before any further mutation.",
+        },
+      });
+      expect(JSON.stringify(unknown)).not.toContain("SENTINEL-PROVIDER-DETAIL");
       await client.close();
     } finally {
       await fixture.close();
