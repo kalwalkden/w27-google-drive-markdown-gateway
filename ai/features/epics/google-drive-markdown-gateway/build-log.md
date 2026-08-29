@@ -124,3 +124,12 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
   validation, exact `If-Match` update/archive requests, stable conflict handling, and default-disabled
   composition. All validation remains fake-only until an operator supplies external evidence.
 - Status: specification complete; implementation pending
+
+## 2026-08-29 — 02-authenticated-service-api / 001-service-config-and-principal-verification specification
+
+- Spec shaping: `gpt-5.6-terra`, high reasoning because this task defines JWT issuer/JWKS policy,
+  cross-principal confusion defenses, rotating file-backed Codex credentials, and redacted failures.
+- Result: approved implementation package for strict no-I/O configuration, externally issued Work
+  JWT verification, separate constant-time Codex bearer verification, two minimal principals, and
+  fake-only authentication tests.
+- Status: specification complete; implementation pending
