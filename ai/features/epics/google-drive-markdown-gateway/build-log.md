@@ -54,3 +54,14 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
   reasoning; implementation intentionally waits for the committed task-002 evidence contract.
 - `01-drive-core / 001-domain-contracts-and-safe-resolution`: `gpt-5.6-terra`, medium reasoning;
   pure contracts and fake-only tests need no premium model.
+
+## 2026-08-29 — 00-platform-validation / 003-client-validation-and-write-gate
+
+- Implementation and bounded repair: `gpt-5.6-terra`, high reasoning because this task verifies
+  Ed25519 approvals, evidence freshness, replay protection, and expiring write leases.
+- Root review strengthened unchanged-snapshot proof, cleanup consistency, evidence age and input
+  bounds, own-key lookup, and lease expiry/entropy handling.
+- Validation: frozen install, full `CI=true pnpm check`, diff check, credential scan, and vendored
+  skills all passed; the combined tree had 67 fake-only tests.
+- No signing, live Drive, Work, Codex, or credential operation was performed.
+- Status: complete; commit pending

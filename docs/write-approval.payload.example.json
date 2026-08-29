@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "approvalId": "00000000-0000-4000-8000-000000000000",
+  "gatewayEnvironment": "example-environment",
+  "driveConfigurationFingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "evidenceSha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "authMode": "shared-drive-adc",
+  "topology": "shared-drive",
+  "issuedAt": "2026-01-01T00:00:00.000Z",
+  "expiresAt": "2026-01-01T00:05:00.000Z"
+}

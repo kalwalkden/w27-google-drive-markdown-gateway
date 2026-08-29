@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-01-01T00:00:00.000Z",
+  "releaseDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "chatgptWork": {
+    "pluginBuildIdentifier": "example-plugin-build",
+    "mcpOriginIdentifier": "example-mcp-origin",
+    "oauthIssuerIdentifier": "example-issuer",
+    "oauthAudienceIdentifier": "example-audience",
+    "oauthRedirectUriIdentifier": "example-redirect-uri",
+    "jwksKeyIdentifier": "example-jwks-key",
+    "principalIdentifier": "example-work-principal",
+    "readCheck": "passed",
+    "writeApprovalCheck": "passed"
+  },
+  "codexCloud": {
+    "environmentIdentifier": "example-environment",
+    "gatewayHostnameIdentifier": "example-gateway-host",
+    "allowedMethodIdentifiers": ["GET", "POST", "PATCH"],
+    "principalKeyIdentifier": "example-codex-key",
+    "healthCheck": "passed",
+    "readCheck": "passed",
+    "writeWithoutLeaseCheck": "denied-as-expected"
+  }
+}
