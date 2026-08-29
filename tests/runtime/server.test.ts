@@ -13,7 +13,7 @@ function config(mode: "shared-drive-adc" | "my-drive-refresh-token") {
     rootFolderId: "root",
     archiveFolderId: "archive",
     maxMarkdownBytes: 1_000,
-    maxTraversalNodes: 10,
+    maxTraversalNodes: 11,
     maxPages: 1,
     maxResults: 10,
     ...(mode === "shared-drive-adc"
@@ -143,6 +143,18 @@ describe("runtime composition", () => {
     if (!service) throw new Error("runtime did not compose a service");
     await expect(service.listMarkdown()).resolves.toEqual([]);
     expect(listOptions).toEqual([{ limit: 3, overflowSignal: true }]);
+  });
+
+  it("redacts an equal traversal and HTTP result limit before runtime composition", async () => {
+    const parsed = JSON.parse(config("shared-drive-adc")) as {
+      drive: { maxTraversalNodes: number };
+      http: { maxResultItems: number };
+    };
+    parsed.drive.maxTraversalNodes = parsed.http.maxResultItems;
+
+    await expect(
+      composeRuntime(JSON.stringify(parsed), runtimeDependencies([])),
+    ).rejects.toThrow("Runtime configuration is invalid.");
   });
 
   it("loads a bounded OAuth file only for My Drive before composing its adapter", async () => {

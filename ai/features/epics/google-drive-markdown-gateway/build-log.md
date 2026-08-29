@@ -344,3 +344,13 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - Validation: full combined `CI=true pnpm check` passed with 203 tests. No live plugin install,
   Work/Drive/cloud call, credential, OAuth/JWKS request, or external network action ran.
 - Status: complete; independent feature review pending
+
+## 2026-08-29 — Drive result-cap capacity invariant
+
+- Final Drive acceptance found otherwise-valid configuration could set the traversal budget below
+  the public result cap plus its overflow sentinel. Configuration now requires
+  `maxTraversalNodes >= maxResultItems + 1`, while runtime failures remain generic and redacted.
+- Exact `+1`, defaults, equal-limit rejection, and composed-runtime failure are covered.
+- Validation: full combined checks passed with 208 tests. No provider, credential, Drive, or
+  external network call ran.
+- Status: repaired; final independent acceptance rerun pending

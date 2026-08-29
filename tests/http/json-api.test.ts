@@ -38,7 +38,7 @@ function config() {
       archiveFolderId: "archive",
       sharedDriveId: "drive",
       maxMarkdownBytes: 1_000,
-      maxTraversalNodes: 10,
+      maxTraversalNodes: 11,
       maxPages: 1,
       maxResults: 10,
     },

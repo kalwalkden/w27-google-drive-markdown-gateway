@@ -192,6 +192,18 @@ const serviceConfigSchema = z
         path: ["http", "maxResultItems"],
       });
     }
+    const requiredTraversalNodes = http.maxResultItems + 1;
+    if (
+      !Number.isSafeInteger(requiredTraversalNodes) ||
+      drive.maxTraversalNodes < requiredTraversalNodes
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Drive traversal limit must accommodate the HTTP result limit and overflow signal",
+        path: ["drive", "maxTraversalNodes"],
+      });
+    }
   });
 
 export type ServiceConfig = Readonly<{

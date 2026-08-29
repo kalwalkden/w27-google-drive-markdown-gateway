@@ -162,6 +162,12 @@ describe("service configuration", () => {
 
   it("requires finite HTTP bounds compatible with the Drive limits", () => {
     expect(parseServiceConfig(validConfig()).http.maxResultItems).toBe(100);
+    expect(
+      parseServiceConfig({
+        ...validConfig(),
+        drive: { ...validConfig().drive, maxTraversalNodes: 101 },
+      }).drive.maxTraversalNodes,
+    ).toBe(101);
     for (const http of [
       { ...validConfig().http, maxRequestMarkdownBytes: 1_000_001 },
       { ...validConfig().http, maxJsonBodyBytes: 6_004_095 },
@@ -171,5 +177,11 @@ describe("service configuration", () => {
     ]) {
       expect(() => parseServiceConfig({ ...validConfig(), http })).toThrow();
     }
+    expect(() =>
+      parseServiceConfig({
+        ...validConfig(),
+        drive: { ...validConfig().drive, maxTraversalNodes: 100 },
+      }),
+    ).toThrow("Drive traversal limit must accommodate the HTTP result limit");
   });
 });
