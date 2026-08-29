@@ -2,7 +2,7 @@
 
 ## Status
 
-Approved
+Complete
 
 ## Requirements
 
@@ -27,4 +27,3 @@ No implementation exists. The boundary and six-operation contract are defined in
 ## Open Questions
 
 None.
-

@@ -367,3 +367,13 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - Validation: full combined `CI=true pnpm check` passed with 208 tests. No cloud session, allowlist
   mutation, live endpoint, credential, Drive, or external network call ran.
 - Status: complete; independent feature review pending
+
+## 2026-08-29 — 01-drive-core final acceptance
+
+- Independent final acceptance: `gpt-5.6-terra`, high reasoning, fresh read-only context, following
+  multiple premium adversarial rounds. Verdict: `Ready`, with no findings.
+- Reconfirmed strict capacity invariants, complete duplicate-aware search, opaque overflow handling,
+  well-formed IDs, direct-root confinement, exact media consistency, non-forgeable write authority,
+  disabled archive, and no delete/trash/retry path.
+- Validation: full combined `CI=true pnpm check` passed with 208 tests.
+- Status: complete; grouped-epic archival checklist update follows
