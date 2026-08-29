@@ -168,3 +168,13 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - Isolated Node 24.19.0 validation passed: full `CI=true pnpm check`, 99 tests, build, vendored-skill
   verification, and comparison diff check. No live Drive, credential, or network operation ran.
 - Status: feature complete; grouped-epic checklist/archival procedure follows
+
+## 2026-08-29 — 02-authenticated-service-api / 002-json-api-and-redacted-audit-events specification
+
+- Spec shaping: `gpt-5.6-terra`, high reasoning because this task defines the authenticated route
+  lifecycle, bounded request/rate/deadline behavior, stable error mapping, and content-free audit
+  contract around a separately guarded write capability.
+- Result: approved implementation package for six exact Express routes, strict wire schemas,
+  default-disabled write-session provision, bounded success/error envelopes, and allowlisted Pino
+  events. Authentication alone never grants mutation authority.
+- Status: specification complete; implementation pending
