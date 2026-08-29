@@ -2,7 +2,7 @@
 
 ## Status
 
-Approved
+Complete
 
 ## Context
 
@@ -39,4 +39,3 @@ Migration documentation and manifest/helper assets using the gateway contract. N
 ## Open Questions
 
 None.
-
