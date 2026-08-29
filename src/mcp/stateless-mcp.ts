@@ -22,6 +22,7 @@ import {
   type MarkdownDocument,
   type MarkdownFileMetadata,
   MarkdownGatewayError,
+  isWellFormedUtf16,
   revision,
   type SearchMarkdownResult,
 } from "../domain/markdown.js";
@@ -67,7 +68,7 @@ const bytes = (minimum: number, maximum: number) =>
   z.string({ error: validationMessage }).refine(
     (value) => {
       const size = Buffer.byteLength(value, "utf8");
-      return size >= minimum && size <= maximum;
+      return isWellFormedUtf16(value) && size >= minimum && size <= maximum;
     },
     { error: validationMessage },
   );
@@ -111,18 +112,30 @@ const publicErrorSchema = z
   .strict();
 
 /**
- * The SDK requires output schemas to have an object root. Handlers always return
- * exactly one of the two shapes below; `isError` results are intentionally not
- * output-validated by the SDK, but retain structured content for compatible clients.
+ * The SDK requires output schemas to have an object root. The refinement makes
+ * the two result variants exclusive while preserving an object-root schema for
+ * MCP tool discovery. The SDK skips output validation for `isError`, so handlers
+ * still construct that variant directly and tests exercise its structured form.
  */
 function outputSchema(data: z.ZodType<unknown>) {
   return z
     .object({
-      ok: z.boolean(),
+      ok: z.union([z.literal(true), z.literal(false)]),
       data: data.optional(),
       error: publicErrorSchema.optional(),
     })
-    .strict();
+    .strict()
+    .superRefine((value, context) => {
+      if (value.ok) {
+        if (value.data === undefined || value.error !== undefined) {
+          context.addIssue({ code: "custom", message: validationMessage });
+        }
+        return;
+      }
+      if (value.data !== undefined || value.error === undefined) {
+        context.addIssue({ code: "custom", message: validationMessage });
+      }
+    });
 }
 
 function listInputSchema() {
@@ -293,7 +306,12 @@ function registerTools(
   const withWrite = async (
     work: (session: MarkdownWriteSession) => Promise<MarkdownFileMetadata>,
   ) => {
-    const session = writeSessionProvider.getWriteSession();
+    let session: MarkdownWriteSession | undefined;
+    try {
+      session = writeSessionProvider.getWriteSession();
+    } catch {
+      return toolFailure({ code: "UNSUPPORTED", message: publicErrorMessage });
+    }
     if (!session)
       return toolFailure({ code: "UNSUPPORTED", message: publicErrorMessage });
     return withFailure(() => work(session));

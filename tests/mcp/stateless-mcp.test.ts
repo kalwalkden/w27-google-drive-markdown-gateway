@@ -213,6 +213,15 @@ describe("stateless MCP adapter", () => {
       ]);
       expect(listed.tools[4]?.description).toContain("CONFLICT");
       expect(listed.tools[5]?.description).toContain("never deletes");
+      expect(listed.tools[0]?.outputSchema).toMatchObject({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          ok: {
+            anyOf: [{ const: true }, { const: false }],
+          },
+        },
+      });
 
       expect(
         structured(
@@ -432,6 +441,7 @@ describe("stateless MCP adapter", () => {
           message: "Service dependency is unavailable.",
         },
       });
+      expect("content" in provider && provider.isError).toBe(true);
       const outside = await client.callTool({
         name: "search_markdown",
         arguments: { query: "sentinel-query" },
@@ -472,6 +482,88 @@ describe("stateless MCP adapter", () => {
         ok: false,
         error: { code: "UNSUPPORTED", message: "Operation is unavailable." },
       });
+      await client.close();
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("treats a write-session provider failure as an unavailable write", async () => {
+    const fixture = await start({
+      writeSessionProvider: {
+        getWriteSession() {
+          throw new Error("SENTINEL-WRITE-SESSION-FAILURE");
+        },
+      },
+    });
+    try {
+      const client = await fixture.connect();
+      const result = await client.callTool({
+        name: "create_markdown",
+        arguments: { path: "new.md", content: "hello" },
+      });
+      expect(structured(result)).toEqual({
+        ok: false,
+        error: { code: "UNSUPPORTED", message: "Operation is unavailable." },
+      });
+      expect(JSON.stringify(result)).not.toContain(
+        "SENTINEL-WRITE-SESSION-FAILURE",
+      );
+      await client.close();
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("rejects ill-formed UTF-16 in every string input before shared seams run", async () => {
+    const calls: string[] = [];
+    const session: MarkdownWriteSession = {
+      async createMarkdown() {
+        calls.push("create");
+        return metadata;
+      },
+      async updateMarkdown() {
+        calls.push("update");
+        return metadata;
+      },
+      async archiveMarkdown() {
+        calls.push("archive");
+        return metadata;
+      },
+    };
+    const fixture = await start({
+      service: {
+        async listMarkdown() {
+          calls.push("list");
+          return [];
+        },
+        async searchMarkdown() {
+          calls.push("search");
+          return [];
+        },
+        async readMarkdown() {
+          calls.push("read");
+          return { ...metadata, content: "hello" };
+        },
+      },
+      writeSessionProvider: { getWriteSession: () => session },
+    });
+    try {
+      const client = await fixture.connect();
+      for (const [name, arguments_] of [
+        ["list_markdown", { path: "\ud800" }],
+        ["search_markdown", { query: "\ud800" }],
+        ["read_markdown", { fileId: "\ud800" }],
+        ["create_markdown", { path: "safe.md", content: "\ud800" }],
+        [
+          "update_markdown",
+          { path: "safe.md", expectedRevision: "\ud800", content: "hello" },
+        ],
+      ] as const) {
+        const result = await client.callTool({ name, arguments: arguments_ });
+        expect("content" in result && result.isError).toBe(true);
+      }
+      expect(calls).toEqual([]);
       await client.close();
     } finally {
       await fixture.close();
