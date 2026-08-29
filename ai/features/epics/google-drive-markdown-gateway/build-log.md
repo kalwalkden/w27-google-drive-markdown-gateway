@@ -270,3 +270,16 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
   MCP adapter, plus diff and vendored-skill checks.
 - No live Drive, credential, cloud, provider, or external network operation ran.
 - Status: repaired; independent acceptance reruns pending
+
+## 2026-08-29 — 03-chatgpt-work-plugin / 001-stateless-mcp-tool-adapter
+
+- Implementation: `gpt-5.6-terra`, high reasoning. Added the exact-pinned official MCP SDK and a
+  request-local stateless Streamable HTTP adapter with six schema-backed tools.
+- Authentication occurs once before protocol dispatch and accepts only the normalized Work
+  principal. Writes require a separately injected pre-opened write session and remain unavailable
+  by default; safe tool errors never include provider, path, revision, content, or credential data.
+- Real SDK client tests cover all six operations, annotations and schemas, auth-first refusal,
+  default-denied writes, conflict handling, malformed-body redaction, and concurrent isolation.
+- Validation: full combined `CI=true pnpm check` passed with 175 tests after integrating concurrent
+  Drive/API repairs. No live Work, Drive, JWT/JWKS, credential, or external network call ran.
+- Status: complete; independent task review pending
