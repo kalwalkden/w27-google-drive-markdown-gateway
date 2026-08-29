@@ -1,0 +1,16 @@
+# Copy this file outside the repository before replacing the placeholder values.
+# Do not add bearer, OAuth, refresh-token, or service-account-key values here.
+project_id               = "replace-with-project-id"
+container_image          = "replace-with-registry-image@sha256:replace-with-64-hex-digest"
+drive_auth_mode          = "shared-drive-adc"
+root_folder_id           = "replace-with-root-folder-id"
+archive_folder_id        = "replace-with-archive-folder-id"
+shared_drive_id          = "replace-with-shared-drive-id"
+codex_bearer_secret_id   = "replace-with-existing-codex-secret-id"
+work_mcp_issuer          = "https://issuer.example.invalid"
+work_mcp_audience        = "replace-with-audience"
+work_mcp_jwks_url        = "https://keys.example.invalid/jwks"
+
+# For my-drive-refresh-token instead, set drive_auth_mode accordingly and set only the
+# existing OAuth secret identifier. Its payload stays in Secret Manager.
+# oauth_secret_id = "replace-with-existing-oauth-secret-id"

@@ -220,3 +220,15 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - Validation: full combined `CI=true pnpm check` passed with 151 tests, plus diff and skill-integrity
   checks. No live Drive, credential, cloud, or external network operation ran.
 - Status: repaired; final independent reruns pending
+
+## 2026-08-29 — 02-authenticated-service-api / 003-cloud-run-container-and-infrastructure
+
+- Implementation: `gpt-5.6-terra`, high reasoning for read-only runtime composition, container
+  boundaries, Secret Manager mounts, dedicated identity, and guarded public reachability.
+- Added an import-safe Node 24 runtime, non-root multi-stage image, Cloud Run v2/Artifact Registry/
+  resource-scoped secret Terraform, operator rotation/rollback guidance, and fake/static tests.
+- Full combined `CI=true pnpm check` passed with 151 tests. Docker and Terraform executables are not
+  installed locally, so image construction and Terraform validation remain explicit operator checks.
+- No secret value, cloud apply/deploy, credential lookup, live Drive, or external network call ran.
+  Production composition intentionally supplies no write session.
+- Status: complete; independent task review pending
