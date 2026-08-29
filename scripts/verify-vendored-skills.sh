@@ -15,6 +15,7 @@ REQUIRED_SKILLS=(
   archive-work-artifact
   ship-feature
   ship-task
+  codex-cloud-markdown-gateway
 )
 
 fail() {

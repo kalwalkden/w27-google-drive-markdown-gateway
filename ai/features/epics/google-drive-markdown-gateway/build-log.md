@@ -354,3 +354,16 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - Validation: full combined checks passed with 208 tests. No provider, credential, Drive, or
   external network call ran.
 - Status: repaired; final independent acceptance rerun pending
+
+## 2026-08-29 — 04-codex-cloud-client / 002-codex-cloud-setup-and-live-verification
+
+- Implementation: `gpt-5.6-terra`, high reasoning. Added a project-scoped Codex skill, exact
+  secret/host/method allowlist setup guide, and an isolated operator-only clean-environment harness
+  with sanitized evidence and conflict/cleanup checks.
+- The harness accepts only external configuration/output paths, invokes the checked-in CLI without
+  a shell, forwards only the three named client variables, and accurately reports the current live
+  state as blocked until a deployed endpoint, credential, egress policy, and operator approval exist.
+- Vendored-skill integrity now covers 10 repository skills.
+- Validation: full combined `CI=true pnpm check` passed with 208 tests. No cloud session, allowlist
+  mutation, live endpoint, credential, Drive, or external network call ran.
+- Status: complete; independent feature review pending
