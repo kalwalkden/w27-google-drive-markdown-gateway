@@ -248,8 +248,122 @@ function archiveInputSchema() {
     .strict();
 }
 
-const mcpResponseEnvelopeAllowanceBytes = 512;
+const mcpResponseEnvelopeAllowanceBytes = 4_096;
 const maxMcpRequestIdBytes = 256;
+
+interface McpResponseCapture {
+  readonly responseText: () => string | undefined;
+  readonly restore: () => void;
+}
+
+function asResponseChunk(chunk: unknown, encoding?: BufferEncoding): Buffer {
+  if (Buffer.isBuffer(chunk)) return chunk;
+  if (chunk instanceof Uint8Array) return Buffer.from(chunk);
+  return Buffer.from(String(chunk), encoding);
+}
+
+/**
+ * The SDK writes directly to Node's response object. Buffer its finite JSON
+ * response before headers leave the process so every SDK-generated envelope
+ * follows the configured response cap without truncating a protocol document.
+ */
+function captureMcpResponse(
+  response: Response,
+  maximumBytes: number,
+): McpResponseCapture {
+  const originalWriteHead = response.writeHead.bind(response);
+  const originalWrite = response.write.bind(response);
+  const originalEnd = response.end.bind(response);
+  const chunks: Buffer[] = [];
+  let capturedBytes = 0;
+  let exceeded = false;
+  let ended = false;
+  let capturedHead: Parameters<Response["writeHead"]> | undefined;
+
+  const capture = (chunk: unknown, encoding?: BufferEncoding): void => {
+    if (chunk === undefined || exceeded) return;
+    const bytes = asResponseChunk(chunk, encoding);
+    capturedBytes += bytes.length;
+    if (capturedBytes > maximumBytes) {
+      exceeded = true;
+      chunks.length = 0;
+      return;
+    }
+    chunks.push(bytes);
+  };
+
+  response.writeHead = ((...args: Parameters<Response["writeHead"]>) => {
+    capturedHead = args;
+    response.statusCode = args[0];
+    return response;
+  }) as Response["writeHead"];
+  response.write = ((
+    chunk: unknown,
+    encoding?: BufferEncoding,
+    callback?: (error?: Error | null) => void,
+  ) => {
+    capture(chunk, encoding);
+    callback?.();
+    return true;
+  }) as Response["write"];
+  response.end = ((
+    chunk?: unknown,
+    encoding?: BufferEncoding,
+    callback?: () => void,
+  ) => {
+    if (ended) return response;
+    ended = true;
+    capture(chunk, encoding);
+    if (exceeded) {
+      response.statusCode = 500;
+      response.setHeader("Cache-Control", "no-store");
+      response.setHeader("Content-Type", "application/json");
+      originalEnd(responseLimitError(), callback);
+      return response;
+    }
+    if (capturedHead) originalWriteHead(...capturedHead);
+    for (const value of chunks) originalWrite(value);
+    originalEnd(callback);
+    return response;
+  }) as Response["end"];
+
+  return {
+    responseText: () =>
+      exceeded ? undefined : Buffer.concat(chunks).toString("utf8"),
+    restore: () => {
+      response.writeHead = originalWriteHead;
+      response.write = originalWrite;
+      response.end = originalEnd;
+    },
+  };
+}
+
+function isJsonRpcErrorResponse(responseText: string | undefined): boolean {
+  if (responseText === undefined) return true;
+  if (responseText === "") return false;
+  try {
+    const envelope = JSON.parse(responseText) as unknown;
+    const messages = Array.isArray(envelope) ? envelope : [envelope];
+    return messages.some(
+      (message) =>
+        typeof message === "object" && message !== null && "error" in message,
+    );
+  } catch {
+    return true;
+  }
+}
+
+function finalMcpResult(
+  response: Response,
+  responseText: string | undefined,
+  toolOutcome: ReturnType<typeof auditResultForToolError> | undefined,
+): MarkdownApiAuditResult {
+  if (toolOutcome !== undefined) return toolOutcome.result;
+  if (response.statusCode >= 400 || isJsonRpcErrorResponse(responseText)) {
+    return "invalid_request";
+  }
+  return "succeeded";
+}
 
 function exceedsMcpProtocolResponseLimit(
   body: unknown,
@@ -294,9 +408,9 @@ function isMcpToolCall(body: unknown): boolean {
 
 /**
  * The SDK serializes tool content twice: once as text and once as structured
- * content. Reserve a small, fixed amount for the JSON-RPC result envelope as
- * well. Request IDs and batches are bounded before protocol dispatch, so this
- * fixed allowance covers the remaining response framing.
+ * content. Reserve a conservative fixed amount for the JSON-RPC result
+ * envelope as well. Request IDs and batches are bounded before protocol
+ * dispatch, so this allowance covers the remaining response framing.
  */
 function exceedsMcpResponseLimit(data: unknown, maximumBytes: number): boolean {
   try {
@@ -683,6 +797,10 @@ export function createStatelessMcpApp(
         sessionIdGenerator: undefined,
         enableJsonResponse: true,
       });
+      const capturedResponse = captureMcpResponse(
+        response,
+        dependencies.config.http.maxJsonResponseBytes,
+      );
       let toolOutcome: ReturnType<typeof auditResultForToolError> | undefined =
         isMcpToolCall(request.body) ? { result: "invalid_request" } : undefined;
       try {
@@ -694,7 +812,11 @@ export function createStatelessMcpApp(
         complete(
           request,
           response,
-          toolOutcome?.result ?? "succeeded",
+          finalMcpResult(
+            response,
+            capturedResponse.responseText(),
+            toolOutcome,
+          ),
           toolOutcome?.dependencyFailure,
         );
       } catch {
@@ -709,6 +831,7 @@ export function createStatelessMcpApp(
           complete(request, response, "internal");
         }
       } finally {
+        capturedResponse.restore();
         await server.close().catch(() => undefined);
       }
     },

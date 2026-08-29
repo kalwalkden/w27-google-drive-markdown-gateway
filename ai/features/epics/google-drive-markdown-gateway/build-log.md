@@ -411,3 +411,16 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - Validation: full combined `CI=true pnpm check` passed with 241 tests, build verification, and 10
   vendored skills. No live Drive, Work, Codex cloud, credential, or external network call ran.
 - Status: repaired; fresh independent Work, Codex, and operational acceptance reruns pending.
+
+## 2026-08-29 — Complete MCP wire cap and Codex cleanup state
+
+- MCP now buffers and bounds every SDK JSON response, including discovery, and rejects service
+  configuration below the minimum size required by the six published tool contracts. Protocol
+  error envelopes are recorded as invalid requests rather than successful calls.
+- Codex evidence now contains one closed, complete ten-stage outcome set. Ambiguous update or stale
+  update results cannot trigger archive with an unverified revision; cleanup requires a fresh exact
+  reread or falls back to an opaque manual-recovery direction.
+- Validation: full combined `CI=true pnpm check` passed with 252 tests, build verification, and 10
+  vendored skills. No live Drive, Work, Codex cloud, credential, or external network call ran.
+- Status: narrow acceptance repairs complete; the separately identified production write/archive
+  product gap remains open and will be handled as an explicit spec-first feature.

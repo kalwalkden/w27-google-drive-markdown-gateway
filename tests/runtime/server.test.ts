@@ -44,7 +44,7 @@ function config(mode: "shared-drive-adc" | "my-drive-refresh-token") {
       maxRequestMarkdownBytes: 1_000,
       maxJsonBodyBytes: 10_096,
       maxResultItems: 10,
-      maxJsonResponseBytes: 4_096,
+      maxJsonResponseBytes: 16_384,
       requestTimeoutMs: 1_000,
       rateLimitWindowMs: 1_000,
       maxRequestsPerWindow: 10,

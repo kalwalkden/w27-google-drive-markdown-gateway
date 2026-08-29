@@ -75,12 +75,19 @@ const httpsUrlSchema = z
 const boundedPositiveInteger = (minimum: number, maximum: number) =>
   z.number().int().min(minimum).max(maximum);
 
+// The locked MCP SDK's complete six-tool discovery response must fit without
+// schema truncation, while this shared cap still bounds the JSON API as well.
+const minimumJsonResponseBytes = 16_384;
+
 const httpSchema = z
   .object({
     maxRequestMarkdownBytes: boundedPositiveInteger(1, 1_048_576),
     maxJsonBodyBytes: boundedPositiveInteger(4_096, 6_295_552),
     maxResultItems: boundedPositiveInteger(1, 100),
-    maxJsonResponseBytes: boundedPositiveInteger(4_096, 6_295_552),
+    maxJsonResponseBytes: boundedPositiveInteger(
+      minimumJsonResponseBytes,
+      6_295_552,
+    ),
     requestTimeoutMs: boundedPositiveInteger(100, 30_000),
     rateLimitWindowMs: boundedPositiveInteger(1_000, 60_000),
     maxRequestsPerWindow: boundedPositiveInteger(1, 120),

@@ -52,6 +52,14 @@ type Mode =
   | "create-unsupported"
   | "stale-success"
   | "readback-mismatch"
+  | "update-transport"
+  | "update-malformed"
+  | "update-throw"
+  | "update-readback-mismatch"
+  | "stale-transport"
+  | "stale-malformed"
+  | "stale-throw"
+  | "stale-readback-mismatch"
   | "archive-failure"
   | "archive-unverified"
   | "archive-throw"
@@ -121,6 +129,28 @@ function fakeRunner(
           return gatewayFailure("create_markdown", "UNSUPPORTED");
         if (command === "update") {
           updates += 1;
+          if (updates === 1 && mode === "update-malformed")
+            return { exitCode: 0, stdout: "not-json" };
+          if (updates === 2 && mode === "stale-malformed")
+            return { exitCode: 0, stdout: "not-json" };
+          if (updates === 1 && mode === "update-throw")
+            throw new Error("runner failure");
+          if (updates === 2 && mode === "stale-throw")
+            throw new Error("runner failure");
+          if (
+            (updates === 1 && mode === "update-transport") ||
+            (updates === 2 && mode === "stale-transport")
+          )
+            return {
+              exitCode: 4,
+              stdout: JSON.stringify({
+                ok: false,
+                error: {
+                  code: "TRANSPORT",
+                  message: "Gateway request failed.",
+                },
+              }),
+            };
           if (updates === 2 && mode !== "stale-success")
             return gatewayFailure("update_markdown", "CONFLICT");
           revision = updates === 1 ? "revision-2" : "revision-3";
@@ -140,9 +170,13 @@ function fakeRunner(
                   content:
                     mode === "readback-mismatch" && reads === 1
                       ? "wrong"
-                      : revision === "revision-1"
-                        ? `w27 validation ${runId}\n`
-                        : `w27 validation updated ${runId}\n`,
+                      : mode === "update-readback-mismatch" && reads === 2
+                        ? "wrong"
+                        : mode === "stale-readback-mismatch" && reads === 3
+                          ? "wrong"
+                          : revision === "revision-1"
+                            ? `w27 validation ${runId}\n`
+                            : `w27 validation updated ${runId}\n`,
                 }
               : command === "archive"
                 ? metadata(
@@ -175,6 +209,18 @@ const future = {
   uuid: () => runId,
   now: () => new Date(timestamp),
 } as const;
+const operationOutcomeKeys = [
+  "list",
+  "archive_preflight",
+  "search",
+  "create",
+  "read",
+  "update",
+  "read_after_update",
+  "stale_update",
+  "read_after_conflict",
+  "archive",
+] as const;
 
 describe("Codex cloud harness", () => {
   it("requires a closed external config and output grammar", () => {
@@ -238,8 +284,15 @@ describe("Codex cloud harness", () => {
     });
     expect(result.operationOutcomes.create).toEqual({
       outcome: "inconclusive",
-      code: "CAPABILITY_BLOCKED",
+      code: "BLOCKED",
     });
+    expect(Object.keys(result.operationOutcomes)).toEqual(operationOutcomeKeys);
+    expect(Object.values(result.operationOutcomes)).toEqual(
+      operationOutcomeKeys.map(() => ({
+        outcome: "inconclusive",
+        code: "BLOCKED",
+      })),
+    );
   });
 
   it("exercises the future state flow only through the test seam", async () => {
@@ -319,11 +372,11 @@ describe("Codex cloud harness", () => {
   });
 
   it.each([
-    ["stale-success", "stale_update", "MISMATCH"],
-    ["readback-mismatch", "read", "MISMATCH"],
+    ["stale-success", "stale_update", "MISMATCH", "failed"],
+    ["readback-mismatch", "read", "MISMATCH", "failed"],
   ] as const)(
-    "fails on stale/readback mismatch and still attempts exact cleanup: %s",
-    async (mode, field, code) => {
+    "does not archive after stale/readback verification failure: %s",
+    async (mode, field, code, overall) => {
       const fake = fakeRunner(mode);
       const result = await runHarness(
         config,
@@ -331,11 +384,55 @@ describe("Codex cloud harness", () => {
         fake.runner,
         future,
       );
-      expect(result.overall).toBe("failed");
+      expect(result.overall).toBe(overall);
       expect(result.operationOutcomes[field]).toMatchObject({ code });
       expect(fake.calls.filter((args) => args[2] === "archive")).toHaveLength(
-        1,
+        0,
       );
+      expect(result.operationOutcomes.archive).toEqual({
+        outcome: "inconclusive",
+        code: "NOT_ATTEMPTED",
+      });
+      expect(result.manualCleanup).toMatchObject({
+        required: true,
+        runReference: runId,
+      });
+    },
+  );
+
+  it.each([
+    ["update-transport", "update", "inconclusive", "TRANSPORT"],
+    ["update-malformed", "update", "inconclusive", "PROTOCOL"],
+    ["update-throw", "update", "failed", "FAILED"],
+    ["update-readback-mismatch", "read_after_update", "failed", "MISMATCH"],
+    ["stale-transport", "stale_update", "inconclusive", "TRANSPORT"],
+    ["stale-malformed", "stale_update", "inconclusive", "PROTOCOL"],
+    ["stale-throw", "stale_update", "failed", "FAILED"],
+    ["stale-readback-mismatch", "read_after_conflict", "failed", "MISMATCH"],
+  ] as const)(
+    "never archives after an unsafe update or stale-update path: %s",
+    async (mode, field, outcome, code) => {
+      const fake = fakeRunner(mode);
+      const result = await runHarness(
+        config,
+        confirmation,
+        fake.runner,
+        future,
+      );
+      expect(result.operationOutcomes[field]).toEqual({ outcome, code });
+      expect(fake.calls.filter((args) => args[2] === "archive")).toHaveLength(
+        0,
+      );
+      expect(result.operationOutcomes.archive).toEqual({
+        outcome: "inconclusive",
+        code: "NOT_ATTEMPTED",
+      });
+      expect(result.cleanup).toBe("inconclusive");
+      expect(result.manualCleanup).toEqual({
+        required: true,
+        runReference: runId,
+        direction: "locate-exact-generated-run-file-and-archive-manually",
+      });
     },
   );
 
@@ -366,8 +463,17 @@ describe("Codex cloud harness", () => {
   it("rejects malformed CLI output and still avoids a mutation retry", async () => {
     const fake = fakeRunner("malformed");
     const result = await runHarness(config, confirmation, fake.runner, future);
-    expect(result.overall).toBe("failed");
+    expect(result.overall).toBe("inconclusive");
     expect(fake.calls).toHaveLength(1);
+    expect(result.operationOutcomes.list).toEqual({
+      outcome: "inconclusive",
+      code: "PROTOCOL",
+    });
+    for (const stage of operationOutcomeKeys.slice(1))
+      expect(result.operationOutcomes[stage]).toEqual({
+        outcome: "inconclusive",
+        code: "NOT_ATTEMPTED",
+      });
   });
 
   it("treats malformed create output as uncertain and preserves cleanup direction", async () => {
@@ -407,8 +513,25 @@ describe("Codex cloud harness", () => {
     const fake = fakeRunner();
     const result = await runHarness(config, confirmation, fake.runner, future);
     expect(assertSanitizedEvidence(result)).toEqual(result);
+    expect(Object.keys(result.operationOutcomes)).toEqual(operationOutcomeKeys);
     expect(() =>
       assertSanitizedEvidence({ ...result, nested: { revision: "unsafe" } }),
+    ).toThrow();
+    const { archive: _archive, ...missingArchive } = result.operationOutcomes;
+    expect(() =>
+      assertSanitizedEvidence({
+        ...result,
+        operationOutcomes: missingArchive,
+      }),
+    ).toThrow();
+    expect(() =>
+      assertSanitizedEvidence({
+        ...result,
+        operationOutcomes: {
+          ...result.operationOutcomes,
+          execution: { outcome: "passed", code: "OK" },
+        },
+      }),
     ).toThrow();
     expect(() =>
       assertSanitizedEvidence({ ...result, completedAt: "not-a-time" }),

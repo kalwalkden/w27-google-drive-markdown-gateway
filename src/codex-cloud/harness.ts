@@ -21,7 +21,8 @@ type GatewayFailureCode = keyof typeof gatewayFailures;
 type ClientFailureCode = keyof typeof clientFailures;
 type ResultCode =
   | "OK"
-  | "CAPABILITY_BLOCKED"
+  | "BLOCKED"
+  | "NOT_ATTEMPTED"
   | GatewayFailureCode
   | ClientFailureCode
   | "MISMATCH"
@@ -82,6 +83,22 @@ export interface OperationOutcome {
   readonly outcome: HarnessOutcome;
   readonly code: ResultCode;
 }
+const operationStages = [
+  "list",
+  "archive_preflight",
+  "search",
+  "create",
+  "read",
+  "update",
+  "read_after_update",
+  "stale_update",
+  "read_after_conflict",
+  "archive",
+] as const;
+type OperationStage = (typeof operationStages)[number];
+export type OperationOutcomes = Readonly<{
+  [stage in OperationStage]: OperationOutcome;
+}>;
 export interface HarnessEvidence {
   readonly schemaVersion: 1;
   readonly harnessVersion: "2";
@@ -99,7 +116,7 @@ export interface HarnessEvidence {
     archive: "disabled";
   }>;
   readonly overall: "passed" | "failed" | "inconclusive" | "blocked";
-  readonly operationOutcomes: Readonly<Record<string, OperationOutcome>>;
+  readonly operationOutcomes: OperationOutcomes;
   readonly staleConflict: HarnessOutcome;
   readonly cleanup: HarnessOutcome;
   readonly manualCleanup:
@@ -298,6 +315,18 @@ async function invoke(
 }
 
 const passed = (): OperationOutcome => ({ outcome: "passed", code: "OK" });
+const notAttempted = (): OperationOutcome => ({
+  outcome: "inconclusive",
+  code: "NOT_ATTEMPTED",
+});
+const blocked = (): OperationOutcome => ({
+  outcome: "inconclusive",
+  code: "BLOCKED",
+});
+const initialOutcomes = (): Record<OperationStage, OperationOutcome> =>
+  Object.fromEntries(
+    operationStages.map((stage) => [stage, notAttempted()]),
+  ) as Record<OperationStage, OperationOutcome>;
 const resultOutcome = (
   record: Exclude<CliRecord, { ok: true }>,
 ): OperationOutcome => ({
@@ -366,20 +395,11 @@ export async function runHarness(
   // archive disabled. Keep the live executable blocked unless its capability
   // profile and evidence contract both change.
   if (dependencies.testOnlyFutureCapabilities !== true) {
-    const blocked = {
-      outcome: "inconclusive",
-      code: "CAPABILITY_BLOCKED",
-    } as const;
     return baseEvidence(config, startedAt, now().toISOString(), runIdentifier, {
       overall: "blocked",
-      operationOutcomes: {
-        list: blocked,
-        search: blocked,
-        read: blocked,
-        create: blocked,
-        update: blocked,
-        archive: blocked,
-      },
+      operationOutcomes: Object.fromEntries(
+        operationStages.map((stage) => [stage, blocked()]),
+      ) as OperationOutcomes,
       staleConflict: "inconclusive",
       cleanup: "passed",
       manualCleanup: { required: false },
@@ -396,12 +416,13 @@ async function runFutureSequence(
   startedAt: string,
   now: () => Date,
 ): Promise<HarnessEvidence> {
-  const outcomes: Record<string, OperationOutcome> = {};
+  const outcomes = initialOutcomes();
   let staleConflict: HarnessOutcome = "inconclusive";
   let cleanup: HarnessOutcome = "inconclusive";
   let current: Metadata | undefined;
   let cleanupDirection: HarnessEvidence["manualCleanup"] = { required: false };
   let createUncertain = false;
+  let archiveRevisionVerified = false;
   const relativePath = `${config.validationFolder}/w27-codex-cloud-validation-${runIdentifier}.md`;
   const archivedPath = `${config.archiveFolder}/${basename(relativePath)}`;
   const initial = `w27 validation ${runIdentifier}\n`;
@@ -409,17 +430,33 @@ async function runFutureSequence(
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "w27-codex-cloud-"));
   const contentFile = join(temporaryDirectory, "content.md");
   const call = async (
-    name: string,
+    name: OperationStage,
     operation: string,
     args: readonly string[],
   ) => {
-    const record = await invoke(runner, operation, [
-      "--timeout-ms",
-      String(config.timeoutMs),
-      ...args,
-    ]);
-    outcomes[name] = record.ok ? passed() : resultOutcome(record);
-    return record;
+    try {
+      const record = await invoke(runner, operation, [
+        "--timeout-ms",
+        String(config.timeoutMs),
+        ...args,
+      ]);
+      outcomes[name] = record.ok ? passed() : resultOutcome(record);
+      return record;
+    } catch (error) {
+      outcomes[name] = {
+        outcome:
+          error instanceof Error &&
+          (error.message === "protocol" || error.message === "cli-result")
+            ? "inconclusive"
+            : "failed",
+        code:
+          error instanceof Error &&
+          (error.message === "protocol" || error.message === "cli-result")
+            ? "PROTOCOL"
+            : "FAILED",
+      };
+      throw error;
+    }
   };
   try {
     await chmod(temporaryDirectory, 0o700);
@@ -476,13 +513,18 @@ async function runFutureSequence(
       !readData(readCreated.data) ||
       readCreated.data.fileId !== current.fileId ||
       readCreated.data.relativePath !== relativePath ||
-      readCreated.data.content !== initial
+      readCreated.data.content !== initial ||
+      readCreated.data.revision !== current.revision
     ) {
-      outcomes.read = { outcome: "failed", code: "MISMATCH" };
+      if (readCreated.ok)
+        outcomes.read = { outcome: "failed", code: "MISMATCH" };
       throw new Error("readback");
     }
+    archiveRevisionVerified = true;
     const staleRevision = current.revision;
     await writeFile(contentFile, fresh, { encoding: "utf8", mode: 0o600 });
+    // A mutation may have applied even when its result cannot be verified.
+    archiveRevisionVerified = false;
     const updated = await call("update", "update_markdown", [
       "update",
       "--file-id",
@@ -516,9 +558,13 @@ async function runFutureSequence(
       readUpdated.data.content !== fresh ||
       readUpdated.data.revision !== current.revision
     ) {
-      outcomes.read_after_update = { outcome: "failed", code: "MISMATCH" };
+      if (readUpdated.ok)
+        outcomes.read_after_update = { outcome: "failed", code: "MISMATCH" };
       throw new Error("readback");
     }
+    archiveRevisionVerified = true;
+    // Re-establish the current revision after the deliberate stale mutation.
+    archiveRevisionVerified = false;
     const stale = await call("stale_update", "update_markdown", [
       "update",
       "--file-id",
@@ -550,19 +596,19 @@ async function runFutureSequence(
       preserved.data.content !== fresh ||
       preserved.data.revision !== current.revision
     ) {
-      outcomes.read_after_conflict = { outcome: "failed", code: "MISMATCH" };
+      if (preserved.ok)
+        outcomes.read_after_conflict = { outcome: "failed", code: "MISMATCH" };
       throw new Error("preservation");
     }
+    archiveRevisionVerified = true;
   } catch {
     if (createUncertain) {
       cleanupDirection = manualCleanup(runIdentifier);
       outcomes.create = { outcome: "inconclusive", code: "PROTOCOL" };
     }
-    if (!Object.values(outcomes).some(({ outcome }) => outcome !== "passed"))
-      outcomes.execution = { outcome: "failed", code: "FAILED" };
   } finally {
     try {
-      if (current) {
+      if (current && archiveRevisionVerified) {
         const archived = await call("archive", "archive_markdown", [
           "archive",
           "--file-id",
@@ -587,8 +633,9 @@ async function runFutureSequence(
             };
           cleanupDirection = manualCleanup(runIdentifier);
         }
-      } else if (cleanupDirection.required) {
+      } else if (current || cleanupDirection.required) {
         cleanup = "inconclusive";
+        cleanupDirection = manualCleanup(runIdentifier);
       } else {
         cleanup = "passed";
       }
@@ -632,7 +679,8 @@ const outcomeSchema = z
     outcome: z.enum(["passed", "failed", "inconclusive"]),
     code: z.enum([
       "OK",
-      "CAPABILITY_BLOCKED",
+      "BLOCKED",
+      "NOT_ATTEMPTED",
       "UNAUTHENTICATED",
       "UNSUPPORTED",
       "CONFLICT",
@@ -668,7 +716,20 @@ const evidenceSchema = z
       })
       .strict(),
     overall: z.enum(["passed", "failed", "inconclusive", "blocked"]),
-    operationOutcomes: z.record(z.string(), outcomeSchema),
+    operationOutcomes: z
+      .object({
+        list: outcomeSchema,
+        archive_preflight: outcomeSchema,
+        search: outcomeSchema,
+        create: outcomeSchema,
+        read: outcomeSchema,
+        update: outcomeSchema,
+        read_after_update: outcomeSchema,
+        stale_update: outcomeSchema,
+        read_after_conflict: outcomeSchema,
+        archive: outcomeSchema,
+      })
+      .strict(),
     staleConflict: z.enum(["passed", "failed", "inconclusive"]),
     cleanup: z.enum(["passed", "failed", "inconclusive"]),
     manualCleanup: z.union([

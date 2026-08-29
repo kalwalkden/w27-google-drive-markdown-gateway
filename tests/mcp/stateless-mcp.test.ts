@@ -63,7 +63,7 @@ function config() {
       maxRequestMarkdownBytes: 100,
       maxJsonBodyBytes: 4_696,
       maxResultItems: 10,
-      maxJsonResponseBytes: 4_096,
+      maxJsonResponseBytes: 16_384,
       requestTimeoutMs: 1_000,
       rateLimitWindowMs: 1_000,
       maxRequestsPerWindow: 10,
@@ -210,6 +210,52 @@ describe("stateless MCP adapter", () => {
       ]);
       expect(JSON.stringify({ events, metrics })).not.toContain(
         "SENTINEL-MCP-FILE-ID",
+      );
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("classifies an SDK JSON-RPC error as one invalid request terminal result", async () => {
+    const events: MarkdownApiAuditEvent[] = [];
+    const metrics: MarkdownMetricObservation[] = [];
+    const fixture = await start({
+      auditLogger: { info: (event) => events.push(event) },
+      metricRecorder: { record: (observation) => metrics.push(observation) },
+    });
+    try {
+      const result = await rawMcpResponse(fixture.endpoint, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "SENTINEL-UNSUPPORTED-SDK-METHOD",
+      });
+      const envelope = JSON.parse(result.text) as { error?: unknown };
+      expect(envelope.error).toBeDefined();
+      expect(events).toEqual([
+        expect.objectContaining({
+          operation: "mcp",
+          result: "invalid_request",
+          statusCode: result.response.status,
+        }),
+      ]);
+      expect(metrics).toEqual([
+        { metric: "gateway_http_in_flight", operation: "mcp", value: 1 },
+        {
+          metric: "gateway_http_requests_total",
+          operation: "mcp",
+          principalKind: "work-mcp",
+          result: "invalid_request",
+        },
+        {
+          metric: "gateway_http_request_duration_ms",
+          operation: "mcp",
+          result: "invalid_request",
+          value: expect.any(Number),
+        },
+        { metric: "gateway_http_in_flight", operation: "mcp", value: -1 },
+      ]);
+      expect(JSON.stringify({ events, metrics })).not.toContain(
+        "SENTINEL-UNSUPPORTED-SDK-METHOD",
       );
     } finally {
       await fixture.close();
@@ -743,6 +789,55 @@ describe("stateless MCP adapter", () => {
     }
   });
 
+  it("caps raw single and batch SDK discovery without truncating tool schemas", async () => {
+    const fixture = await start();
+    try {
+      const single = await rawMcpResponse(fixture.endpoint, {
+        jsonrpc: "2.0",
+        id: "single-discovery",
+        method: "tools/list",
+      });
+      expect(single.response.status).toBe(200);
+      expect(Buffer.byteLength(single.text, "utf8")).toBeLessThanOrEqual(
+        fixture.dependencies.config.http.maxJsonResponseBytes,
+      );
+      const singleEnvelope = JSON.parse(single.text) as {
+        readonly result?: { readonly tools?: unknown[] };
+      };
+      expect(singleEnvelope.result?.tools).toHaveLength(6);
+      expect(singleEnvelope.result?.tools).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: "list_markdown",
+            inputSchema: expect.any(Object),
+            outputSchema: expect.objectContaining({ oneOf: expect.any(Array) }),
+          }),
+          expect.objectContaining({
+            name: "archive_markdown",
+            inputSchema: expect.any(Object),
+            outputSchema: expect.objectContaining({ oneOf: expect.any(Array) }),
+          }),
+        ]),
+      );
+
+      const batch = await rawMcpResponse(fixture.endpoint, [
+        { jsonrpc: "2.0", id: 1, method: "tools/list" },
+        { jsonrpc: "2.0", id: 2, method: "tools/list" },
+      ]);
+      expect(batch.response.status).toBe(400);
+      expect(Buffer.byteLength(batch.text, "utf8")).toBeLessThanOrEqual(
+        fixture.dependencies.config.http.maxJsonResponseBytes,
+      );
+      expect(JSON.parse(batch.text)).toMatchObject({
+        jsonrpc: "2.0",
+        error: { code: -32600 },
+        id: null,
+      });
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("returns safe tool errors, disables writes by default, and does not retry conflicts", async () => {
     let updates = 0;
     const fixture = await start({
@@ -895,7 +990,7 @@ describe("stateless MCP adapter", () => {
         structuredContent: { ok: true, data: { content } },
       });
 
-      content = "SENTINEL-OVERSIZE-CONTENT-".repeat(100);
+      content = "SENTINEL-OVERSIZE-CONTENT-".repeat(1_000);
       const oversized = await client.callTool({
         name: "read_markdown",
         arguments: { fileId: "guide-file" },
@@ -932,7 +1027,7 @@ describe("stateless MCP adapter", () => {
           reads += 1;
           return {
             ...metadata,
-            content: "SENTINEL-OVERSIZE-RAW-CONTENT-".repeat(100),
+            content: "SENTINEL-OVERSIZE-RAW-CONTENT-".repeat(1_000),
           };
         },
       },

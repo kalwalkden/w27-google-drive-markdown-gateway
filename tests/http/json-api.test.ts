@@ -61,7 +61,7 @@ function config() {
       maxRequestMarkdownBytes: 100,
       maxJsonBodyBytes: 4_696,
       maxResultItems: 10,
-      maxJsonResponseBytes: 4_096,
+      maxJsonResponseBytes: 16_384,
       requestTimeoutMs: 1_000,
       rateLimitWindowMs: 1_000,
       maxRequestsPerWindow: 10,
@@ -605,7 +605,7 @@ describe("JSON API", () => {
     expect(tooMany.status).toBe(413);
     expect(events.at(-1)).toMatchObject({ result: "result_limit_exceeded" });
 
-    const sentinel = "MARKDOWN-CONTENT-MUST-NOT-REACH-AUDIT".repeat(200);
+    const sentinel = "MARKDOWN-CONTENT-MUST-NOT-REACH-AUDIT".repeat(1_000);
     const oversized = await call(
       {
         auditLogger: { info: (event) => events.push(event) },

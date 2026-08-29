@@ -95,6 +95,15 @@ describe("service configuration", () => {
     ).toThrow();
   });
 
+  it("rejects response caps that cannot publish the complete MCP discovery schema", () => {
+    expect(() =>
+      parseServiceConfig({
+        ...validConfig(),
+        http: { ...validConfig().http, maxJsonResponseBytes: 16_383 },
+      }),
+    ).toThrow();
+  });
+
   it.each([
     ["rootFolderId", "\ud800"],
     ["archiveFolderId", "\udc00"],
