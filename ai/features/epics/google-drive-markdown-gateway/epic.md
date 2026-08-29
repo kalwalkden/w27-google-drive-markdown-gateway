@@ -20,7 +20,7 @@ General Drive access, Google Workspace document editing, sharing changes, perman
 
 - [x] 00-platform-validation — Establish the reproducible safety and live-platform proof gates.
 - [ ] 01-drive-core — Implement folder-confined Markdown operations behind one application boundary.
-- [ ] 02-authenticated-service-api — Add authenticated JSON HTTPS service, auditability, and deployment.
+- [x] 02-authenticated-service-api — Add authenticated JSON HTTPS service, auditability, and deployment.
 - [ ] 03-chatgpt-work-plugin — Expose the same service through stateless remote MCP.
 - [ ] 04-codex-cloud-client — Provide a diagnostics and fallback CLI with Codex cloud setup guidance.
 - [ ] 05-operational-hardening — Add resilience coverage, observability, recovery, and rotation practices.

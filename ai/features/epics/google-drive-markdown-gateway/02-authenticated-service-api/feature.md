@@ -2,7 +2,7 @@
 
 ## Status
 
-Approved
+Complete
 
 ## Requirements
 
@@ -27,4 +27,3 @@ This feature will introduce the HTTP/auth/config/observability boundaries around
 ## Open Questions
 
 None.
-

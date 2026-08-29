@@ -298,3 +298,13 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
 - Validation: full combined `CI=true pnpm check` passed with 191 tests, plus build, diff, and
   vendored-skill checks. No live Drive, Work, Codex cloud, credentials, or external network ran.
 - Status: repairs complete; independent acceptance reruns pending
+
+## 2026-08-29 — 02-authenticated-service-api final acceptance
+
+- Independent feature review: `gpt-5.6-sol`, high reasoning, fresh read-only context.
+- Verdict: `Ready`, with no findings after three bounded repair rounds.
+- Verified authentication separation, request/result/rate/deadline bounds, redacted audit events,
+  default-deny writes, pre-output enumeration caps, and the complete static Cloud Run rollout/IAM
+  contract. Docker and Terraform executables remain operator-only validation gates.
+- Validation: full combined `CI=true pnpm check` passed with 191 tests.
+- Status: complete; grouped-epic archival checklist update follows
