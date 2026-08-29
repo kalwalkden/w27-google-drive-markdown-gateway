@@ -9,9 +9,11 @@ import {
 } from "../domain/markdown.js";
 import type {
   ConditionalWriteResult,
+  CreateWriteResult,
   DriveNode,
-  DrivePort,
+  DriveReadPort,
   DriveRead,
+  RawDriveWritePort,
   DriveSearchHit,
 } from "./drive-port.js";
 
@@ -36,7 +38,7 @@ interface MutableNode
 }
 
 /** A fixture-focused port; malformed parent graphs are intentional test inputs. */
-export class InMemoryDrivePort implements DrivePort {
+export class InMemoryDrivePort implements DriveReadPort, RawDriveWritePort {
   private readonly nodes = new Map<string, MutableNode>();
   private nextId = 1;
   private nextTick = 0;
@@ -148,15 +150,18 @@ export class InMemoryDrivePort implements DrivePort {
     parent: FolderId,
     name: string,
     content: string,
-  ): Promise<DriveNode> {
-    return this.addFixture({
-      id: `file-${this.nextId++}`,
-      name,
-      kind: "file",
-      parentIds: [parent],
-      content,
-      revision: "1",
-    });
+  ): Promise<CreateWriteResult> {
+    return {
+      outcome: "success",
+      node: this.addFixture({
+        id: `file-${this.nextId++}`,
+        name,
+        kind: "file",
+        parentIds: [parent],
+        content,
+        revision: "1",
+      }),
+    };
   }
 
   async updateFile(
@@ -178,6 +183,7 @@ export class InMemoryDrivePort implements DrivePort {
   async moveFile(
     id: FileId,
     expected: Revision,
+    _source: FolderId,
     destination: FolderId,
   ): Promise<ConditionalWriteResult> {
     const node = this.nodes.get(id);

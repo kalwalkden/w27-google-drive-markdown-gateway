@@ -13,7 +13,34 @@ import type {
   DrivePort,
   DriveRead,
   DriveSearchHit,
+  RawDriveWritePort,
 } from "../../src/drive/drive-port.js";
+import type { GuardedDriveWriter } from "../../src/drive/guarded-drive-write-port.js";
+import type { WriteLease } from "../../src/write-gate/gate.js";
+
+const testLease: WriteLease = { value: "test-only-lease" };
+
+function writerFrom(raw: RawDriveWritePort): GuardedDriveWriter {
+  return {
+    createFile: (_lease, parentId, name, content) =>
+      raw.createFile(parentId, name, content),
+    updateFile: (_lease, fileId, expectedRevision, content) =>
+      raw.updateFile(fileId, expectedRevision, content),
+    moveFile: (
+      _lease,
+      fileId,
+      expectedRevision,
+      sourceFolderId,
+      destinationFolderId,
+    ) =>
+      raw.moveFile(
+        fileId,
+        expectedRevision,
+        sourceFolderId,
+        destinationFolderId,
+      ),
+  };
+}
 
 function fixture() {
   const drive = new InMemoryDrivePort();
@@ -50,14 +77,18 @@ function fixture() {
     parentIds: ["nested"],
     content: "nested",
   });
-  const service = new MarkdownService(drive, {
-    rootFolderId: folderId("root"),
-    archiveFolderId: folderId("archive"),
-    maxMarkdownBytes: 32,
-    defaultSearchLimit: 5,
-    maxSearchLimit: 10,
-  });
-  return { drive, service };
+  const service = new MarkdownService(
+    drive,
+    {
+      rootFolderId: folderId("root"),
+      archiveFolderId: folderId("archive"),
+      maxMarkdownBytes: 32,
+      defaultSearchLimit: 5,
+      maxSearchLimit: 10,
+    },
+    writerFrom(drive),
+  );
+  return { drive, service, session: service.openWriteSession(testLease) };
 }
 
 function expectCode(action: () => Promise<unknown>, code: string) {
@@ -74,14 +105,37 @@ function portFrom(
     listDescendants: drive.listDescendants.bind(drive),
     searchDescendants: drive.searchDescendants.bind(drive),
     readFile: drive.readFile.bind(drive),
-    createFile: drive.createFile.bind(drive),
-    updateFile: drive.updateFile.bind(drive),
-    moveFile: drive.moveFile.bind(drive),
     ...overrides,
   };
 }
 
 describe("MarkdownService", () => {
+  it("keeps writes unavailable until a guarded writer is composed", async () => {
+    const { service } = (() => {
+      const drive = new InMemoryDrivePort();
+      drive.addFixture({ id: "root", name: "root", kind: "folder" });
+      drive.addFixture({
+        id: "archive",
+        name: "archive",
+        kind: "folder",
+        parentIds: ["root"],
+      });
+      return {
+        service: new MarkdownService(drive, {
+          rootFolderId: folderId("root"),
+          archiveFolderId: folderId("archive"),
+        }),
+      };
+    })();
+    await expectCode(
+      () =>
+        service
+          .openWriteSession(testLease)
+          .createMarkdown({ path: "new.md", content: "x" }),
+      "UNSUPPORTED",
+    );
+  });
+
   it("lists, searches, and reads only verified Markdown files", async () => {
     const { service } = fixture();
     expect(
@@ -107,19 +161,19 @@ describe("MarkdownService", () => {
   });
 
   it("creates, conditionally updates, and archives while retaining the file ID", async () => {
-    const { drive, service } = fixture();
-    const created = await service.createMarkdown({
+    const { drive, session } = fixture();
+    const created = await session.createMarkdown({
       path: "docs/new.md",
       content: "é",
     });
     expect(created.relativePath).toBe("docs/new.md");
-    const updated = await service.updateMarkdown({
+    const updated = await session.updateMarkdown({
       fileId: created.fileId,
       expectedRevision: created.revision,
       content: "new",
     });
     expect(updated.revision).toBe(revision("2"));
-    const archived = await service.archiveMarkdown({
+    const archived = await session.archiveMarkdown({
       fileId: created.fileId,
       expectedRevision: updated.revision,
     });
@@ -135,11 +189,11 @@ describe("MarkdownService", () => {
   });
 
   it("does not mutate fake state when an update or archive revision is stale", async () => {
-    const { drive, service } = fixture();
+    const { drive, session } = fixture();
     const before = drive.inspect("guide");
     await expectCode(
       () =>
-        service.updateMarkdown({
+        session.updateMarkdown({
           path: "docs/guide.md",
           expectedRevision: revision("0"),
           content: "unsafe",
@@ -148,7 +202,7 @@ describe("MarkdownService", () => {
     );
     await expectCode(
       () =>
-        service.archiveMarkdown({
+        session.archiveMarkdown({
           path: "docs/guide.md",
           expectedRevision: revision("0"),
         }),
@@ -171,17 +225,18 @@ describe("MarkdownService", () => {
       archiveFolderId: folderId("archive"),
       maxMarkdownBytes: 32,
     });
+    const session = service.openWriteSession(testLease);
     await expectCode(
-      () => service.createMarkdown({ path: "../outside.md", content: "x" }),
+      () => session.createMarkdown({ path: "../outside.md", content: "x" }),
       "INVALID_PATH",
     );
     await expectCode(
-      () => service.createMarkdown({ path: "docs/file.txt", content: "x" }),
+      () => session.createMarkdown({ path: "docs/file.txt", content: "x" }),
       "NOT_MARKDOWN",
     );
     await expectCode(
       () =>
-        service.createMarkdown({
+        session.createMarkdown({
           path: "docs/too-big.md",
           content: "012345678901234567890123456789012",
         }),
@@ -272,10 +327,11 @@ describe("MarkdownService", () => {
       "OUTSIDE_ROOT",
     );
 
-    const invalidArchive = new MarkdownService(drive, {
-      rootFolderId: folderId("root"),
-      archiveFolderId: folderId("cycle-a"),
-    });
+    const invalidArchive = new MarkdownService(
+      drive,
+      { rootFolderId: folderId("root"), archiveFolderId: folderId("cycle-a") },
+      writerFrom(drive),
+    ).openWriteSession(testLease);
     await expectCode(
       () =>
         invalidArchive.archiveMarkdown({
@@ -309,6 +365,40 @@ describe("MarkdownService", () => {
       parentIds: [],
       content: "release",
     });
+    expect(
+      (await service.listMarkdown({ path: "docs", recursive: true })).map(
+        (entry) => entry.relativePath,
+      ),
+    ).toEqual(["docs/nested/child.MD", "docs/guide.md"]);
+    expect(
+      (await service.searchMarkdown({ query: "release" })).map(
+        (entry) => entry.relativePath,
+      ),
+    ).toEqual(["docs/guide.md"]);
+  });
+
+  it("rejects hostile provider names for ID reads and skips them in list/search", async () => {
+    const { drive, service } = fixture();
+    const hostileNames = [
+      "../escape.md",
+      "folder/name.md",
+      "folder\\name.md",
+      "C:escape.md",
+      "control\u0000name.md",
+    ];
+    for (const [index, name] of hostileNames.entries()) {
+      drive.addFixture({
+        id: `hostile-${index}`,
+        name,
+        kind: "file",
+        parentIds: ["docs"],
+        content: "release",
+      });
+      await expectCode(
+        () => service.readMarkdown({ fileId: fileId(`hostile-${index}`) }),
+        "UNSUPPORTED",
+      );
+    }
     expect(
       (await service.listMarkdown({ path: "docs", recursive: true })).map(
         (entry) => entry.relativePath,
@@ -461,11 +551,17 @@ describe("MarkdownService", () => {
     const { drive } = fixture();
     const guide = drive.inspect("guide") as DriveNode;
     const createService = new MarkdownService(
-      portFrom(drive, {
-        createFile: async () => ({ ...guide, name: "wrong.md" }),
-      }),
+      portFrom(drive),
       { rootFolderId: folderId("root"), archiveFolderId: folderId("archive") },
-    );
+      writerFrom({
+        createFile: async () => ({
+          outcome: "success",
+          node: { ...guide, name: "wrong.md" },
+        }),
+        updateFile: drive.updateFile.bind(drive),
+        moveFile: drive.moveFile.bind(drive),
+      }),
+    ).openWriteSession(testLease);
     await expectCode(
       () =>
         createService.createMarkdown({ path: "docs/new.md", content: "new" }),
@@ -473,14 +569,17 @@ describe("MarkdownService", () => {
     );
 
     const updateService = new MarkdownService(
-      portFrom(drive, {
+      portFrom(drive),
+      { rootFolderId: folderId("root"), archiveFolderId: folderId("archive") },
+      writerFrom({
+        createFile: drive.createFile.bind(drive),
         updateFile: async () => ({
           outcome: "success" as const,
           node: { ...guide, revision: revision("2"), size: 999 },
         }),
+        moveFile: drive.moveFile.bind(drive),
       }),
-      { rootFolderId: folderId("root"), archiveFolderId: folderId("archive") },
-    );
+    ).openWriteSession(testLease);
     await expectCode(
       () =>
         updateService.updateMarkdown({
@@ -492,7 +591,11 @@ describe("MarkdownService", () => {
     );
 
     const archiveResponseService = new MarkdownService(
-      portFrom(drive, {
+      portFrom(drive),
+      { rootFolderId: folderId("root"), archiveFolderId: folderId("archive") },
+      writerFrom({
+        createFile: drive.createFile.bind(drive),
+        updateFile: drive.updateFile.bind(drive),
         moveFile: async () => ({
           outcome: "success" as const,
           node: {
@@ -502,8 +605,7 @@ describe("MarkdownService", () => {
           },
         }),
       }),
-      { rootFolderId: folderId("root"), archiveFolderId: folderId("archive") },
-    );
+    ).openWriteSession(testLease);
     await expectCode(
       () =>
         archiveResponseService.archiveMarkdown({
@@ -520,10 +622,11 @@ describe("MarkdownService", () => {
       parentIds: ["archive"],
       content: "old",
     });
-    const archiveService = new MarkdownService(drive, {
-      rootFolderId: folderId("root"),
-      archiveFolderId: folderId("archive"),
-    });
+    const archiveService = new MarkdownService(
+      drive,
+      { rootFolderId: folderId("root"), archiveFolderId: folderId("archive") },
+      writerFrom(drive),
+    ).openWriteSession(testLease);
     await expectCode(
       () =>
         archiveService.archiveMarkdown({

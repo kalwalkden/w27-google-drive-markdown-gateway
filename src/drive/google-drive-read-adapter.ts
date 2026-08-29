@@ -5,12 +5,10 @@ import {
   revision,
   type FileId,
   type FolderId,
-  type Revision,
 } from "../domain/markdown.js";
 import type {
-  ConditionalWriteResult,
   DriveNode,
-  DrivePort,
+  DriveReadPort,
   DriveRead,
   DriveSearchHit,
 } from "./drive-port.js";
@@ -23,7 +21,7 @@ import {
 const folderMimeType = "application/vnd.google-apps.folder";
 const shortcutMimeType = "application/vnd.google-apps.shortcut";
 const metadataFields =
-  "id,name,mimeType,parents,modifiedTime,size,version,trashed,driveId,shortcutDetails";
+  "id,name,mimeType,parents,modifiedTime,size,trashed,driveId,shortcutDetails";
 const defaultMaxReadBytes = 1_000_000;
 const defaultMaxTraversalNodes = 1_000;
 const defaultMaxPages = 100;
@@ -34,8 +32,7 @@ type ProviderOperation =
   | "root-validation"
   | "get-metadata"
   | "list-children"
-  | "read-media"
-  | "write-disabled";
+  | "read-media";
 
 export type GoogleDriveProviderFailure =
   | "authentication"
@@ -82,12 +79,11 @@ interface DriveFileResource {
   readonly parents?: unknown;
   readonly modifiedTime?: unknown;
   readonly size?: unknown;
-  readonly version?: unknown;
   readonly trashed?: unknown;
   readonly driveId?: unknown;
 }
 
-export class GoogleDriveReadAdapter implements DrivePort {
+export class GoogleDriveReadAdapter implements DriveReadPort {
   private readonly maxReadBytes: number;
   private readonly maxTraversalNodes: number;
   private readonly maxPages: number;
@@ -147,7 +143,18 @@ export class GoogleDriveReadAdapter implements DrivePort {
       for (const resource of page.files) {
         if (result.length >= this.maxTraversalNodes)
           throw new GoogleDriveProviderError("limit", "list-children");
-        result.push(normalizeNode(resource, "list-children"));
+        const candidate = normalizeNode(resource, "list-children");
+        if (candidate.kind !== "file") {
+          result.push(candidate);
+          continue;
+        }
+        const current = await this.fetchMetadata(
+          candidate.id as FileId,
+          "get-metadata",
+        );
+        if (!current)
+          throw new GoogleDriveProviderError("malformed", "list-children");
+        result.push(current);
       }
       pageToken = page.nextPageToken;
     } while (pageToken);
@@ -265,7 +272,9 @@ export class GoogleDriveReadAdapter implements DrivePort {
       },
       "read-media",
     );
-    const bytes = toBytes(response);
+    if (response === notFound)
+      throw new GoogleDriveProviderError("not-found", "read-media");
+    const bytes = toBytes(response.data);
     if (bytes.byteLength > this.maxReadBytes || bytes.byteLength !== node.size)
       throw new GoogleDriveProviderError("malformed", "read-media");
     let content: string;
@@ -275,30 +284,6 @@ export class GoogleDriveReadAdapter implements DrivePort {
       throw new GoogleDriveProviderError("malformed", "read-media");
     }
     return { node, content };
-  }
-
-  async createFile(
-    _parentId: FolderId,
-    _name: string,
-    _content: string,
-  ): Promise<DriveNode> {
-    return unsupportedWrite();
-  }
-
-  async updateFile(
-    _fileId: FileId,
-    _expectedRevision: Revision,
-    _content: string,
-  ): Promise<ConditionalWriteResult> {
-    return { outcome: "unsupported" };
-  }
-
-  async moveFile(
-    _fileId: FileId,
-    _expectedRevision: Revision,
-    _destinationFolderId: FolderId,
-  ): Promise<ConditionalWriteResult> {
-    return { outcome: "unsupported" };
   }
 
   private validateConfig(): void {
@@ -393,14 +378,18 @@ export class GoogleDriveReadAdapter implements DrivePort {
     id: FileId | FolderId,
     operation: ProviderOperation,
   ): Promise<Readonly<{ node: DriveNode; driveId?: string }> | undefined> {
-    const data = await this.callGet(
+    const response = await this.callGet(
       { fileId: id, fields: metadataFields, supportsAllDrives: true },
       operation,
     );
-    if (data === notFound) return undefined;
-    const resource = data as DriveFileResource;
+    if (response === notFound) return undefined;
+    const resource = response.data as DriveFileResource;
     return {
-      node: normalizeNode(resource, operation),
+      node: normalizeNode(
+        resource,
+        operation,
+        headerValue(response.headers, "etag"),
+      ),
       driveId: requiredOptionalString(resource.driveId, operation),
     };
   }
@@ -408,9 +397,9 @@ export class GoogleDriveReadAdapter implements DrivePort {
   private async callGet(
     request: Readonly<Record<string, unknown>>,
     operation: ProviderOperation,
-  ): Promise<unknown | typeof notFound> {
+  ): Promise<Readonly<{ data: unknown; headers?: unknown }> | typeof notFound> {
     try {
-      return (await this.api.files.get(request)).data;
+      return await this.api.files.get(request);
     } catch (error) {
       const failure = normalizeFailure(error, operation);
       if (failure.failure === "not-found" && operation === "get-metadata")
@@ -448,10 +437,6 @@ export function createGoogleDriveReadAdapter(
   return new GoogleDriveReadAdapter(config);
 }
 
-function unsupportedWrite(): never {
-  throw new GoogleDriveProviderError("configuration", "write-disabled");
-}
-
 function parseListResource(
   value: unknown,
   operation: ProviderOperation,
@@ -474,6 +459,7 @@ function parseListResource(
 function normalizeNode(
   value: DriveFileResource,
   operation: ProviderOperation,
+  rawEtag?: string,
 ): DriveNode {
   if (!isRecord(value))
     throw new GoogleDriveProviderError("malformed", operation);
@@ -507,17 +493,41 @@ function normalizeNode(
     };
   }
   const size = parseSize(value.size, operation);
-  const version = requiredString(value.version, operation);
   return {
     id: fileId(id),
     name,
     kind: "file",
     parentIds,
     modifiedTime,
-    revision: revision(version),
+    // A file never receives a synthetic revision; list results are refreshed via
+    // metadata GET so every visible mutable document carries its raw HTTP ETag.
+    revision: isEntityTag(rawEtag) ? revision(rawEtag) : undefined,
     size,
     mimeType,
   };
+}
+
+function headerValue(headers: unknown, name: string): string | undefined {
+  if (!headers) return undefined;
+  if (headers instanceof Headers) return headers.get(name) ?? undefined;
+  if (!isRecord(headers)) return undefined;
+  if (typeof headers.get === "function") {
+    try {
+      const value = headers.get(name);
+      if (typeof value === "string" && value.length > 0) return value;
+    } catch {
+      return undefined;
+    }
+  }
+  const value = headers[name] ?? headers[name.toLowerCase()];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function isEntityTag(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^(?:W\/)?"[\x21\x23-\x7E\x80-\xFF]*"$/u.test(value)
+  );
 }
 
 function normalizeFailure(

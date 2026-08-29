@@ -26,9 +26,15 @@ import {
 } from "../domain/markdown.js";
 import type {
   ConditionalWriteResult,
+  CreateWriteResult,
   DriveNode,
-  DrivePort,
+  DriveReadPort,
 } from "../drive/drive-port.js";
+import {
+  DisabledDriveWritePort,
+  type GuardedDriveWriter,
+} from "../drive/guarded-drive-write-port.js";
+import type { WriteLease } from "../write-gate/gate.js";
 
 const DEFAULT_MAX_BYTES = 1_000_000;
 const DEFAULT_SEARCH_LIMIT = 20;
@@ -49,6 +55,12 @@ interface ResolvedNode {
   readonly segments: readonly string[];
 }
 
+export interface MarkdownWriteSession {
+  createMarkdown(input: CreateMarkdownInput): Promise<CreateMarkdownResult>;
+  updateMarkdown(input: UpdateMarkdownInput): Promise<UpdateMarkdownResult>;
+  archiveMarkdown(input: ArchiveMarkdownInput): Promise<ArchiveMarkdownResult>;
+}
+
 export class MarkdownService {
   private readonly maxMarkdownBytes: number;
   private readonly defaultRecursive: boolean;
@@ -56,8 +68,9 @@ export class MarkdownService {
   private readonly maxSearchLimit: number;
 
   constructor(
-    private readonly port: DrivePort,
+    private readonly port: DriveReadPort,
     private readonly config: MarkdownServiceConfig,
+    private readonly writer: GuardedDriveWriter = new DisabledDriveWritePort(),
   ) {
     if (
       !config.rootFolderId ||
@@ -88,6 +101,17 @@ export class MarkdownService {
         "Service limits must be valid positive integers.",
       );
     }
+  }
+
+  openWriteSession(lease: WriteLease): MarkdownWriteSession {
+    return Object.freeze({
+      createMarkdown: (input: CreateMarkdownInput) =>
+        this.createMarkdown(input, lease),
+      updateMarkdown: (input: UpdateMarkdownInput) =>
+        this.updateMarkdown(input, lease),
+      archiveMarkdown: (input: ArchiveMarkdownInput) =>
+        this.archiveMarkdown(input, lease),
+    });
   }
 
   async listMarkdown(
@@ -198,8 +222,9 @@ export class MarkdownService {
     };
   }
 
-  async createMarkdown(
+  private async createMarkdown(
     input: CreateMarkdownInput,
+    lease: WriteLease,
   ): Promise<CreateMarkdownResult> {
     const segments = requireMarkdownPath(input.path);
     requireContentWithinLimit(input.content, this.maxMarkdownBytes);
@@ -216,11 +241,14 @@ export class MarkdownService {
         "A file or folder already exists at this path.",
       );
     }
-    const created = await this.port.createFile(
+    const result = await this.writer.createFile(
+      lease,
       parent.node.id as FolderId,
       leaf,
       input.content,
     );
+    this.throwCreateFailure(result);
+    const created = result.node;
     this.assertDirectChild(created, parent.node.id as FolderId);
     this.assertRegularMarkdown(created);
     if (
@@ -236,13 +264,15 @@ export class MarkdownService {
     return this.toMetadata(created, segments);
   }
 
-  async updateMarkdown(
+  private async updateMarkdown(
     input: UpdateMarkdownInput,
+    lease: WriteLease,
   ): Promise<UpdateMarkdownResult> {
     this.requireExpectedRevision(input.expectedRevision);
     requireContentWithinLimit(input.content, this.maxMarkdownBytes);
     const resolved = await this.resolveFile(input);
-    const result = await this.port.updateFile(
+    const result = await this.writer.updateFile(
+      lease,
       resolved.node.id as FileId,
       input.expectedRevision,
       input.content,
@@ -250,8 +280,9 @@ export class MarkdownService {
     return this.handleUpdateResult(result, resolved, input);
   }
 
-  async archiveMarkdown(
+  private async archiveMarkdown(
     input: ArchiveMarkdownInput,
+    lease: WriteLease,
   ): Promise<ArchiveMarkdownResult> {
     this.requireExpectedRevision(input.expectedRevision);
     const resolved = await this.resolveFile(input);
@@ -274,9 +305,11 @@ export class MarkdownService {
         "Archive destination already contains this file name.",
       );
     }
-    const result = await this.port.moveFile(
+    const result = await this.writer.moveFile(
+      lease,
       resolved.node.id as FileId,
       input.expectedRevision,
+      resolved.node.parentIds[0] as FolderId,
       archive.node.id as FolderId,
     );
     return this.handleArchiveResult(result, resolved, archive, [
@@ -384,6 +417,7 @@ export class MarkdownService {
           "OUTSIDE_ROOT",
           "Drive node does not have one verified parent.",
         );
+      this.assertSafeDriveName(current.name);
       segments.unshift(current.name);
       const parent = await this.port.getNode(current.parentIds[0]);
       if (!parent)
@@ -470,6 +504,7 @@ export class MarkdownService {
         "UNSUPPORTED",
         "Shortcuts are not supported.",
       );
+    this.assertSafeDriveName(node.name);
     if (node.kind !== "file")
       throw new MarkdownGatewayError("NOT_FOUND", "Path is not a file.");
     if (!isMarkdownName(node.name))
@@ -486,6 +521,21 @@ export class MarkdownService {
       throw new MarkdownGatewayError(
         "UNSUPPORTED",
         "Drive file lacks required metadata.",
+      );
+    }
+  }
+
+  /** Drive names become gateway paths only after they pass the caller-path grammar. */
+  private assertSafeDriveName(name: string): void {
+    try {
+      const segments = parseRelativePath(name);
+      if (segments.length !== 1 || canonicalRelativePath(segments) !== name) {
+        throw new Error("not a single segment");
+      }
+    } catch {
+      throw new MarkdownGatewayError(
+        "UNSUPPORTED",
+        "Drive node has an unsafe name.",
       );
     }
   }
@@ -567,6 +617,20 @@ export class MarkdownService {
             ? { currentRevision: result.current.revision ?? "unknown" }
             : {}),
         },
+      );
+    }
+  }
+
+  private throwCreateFailure(
+    result: CreateWriteResult,
+  ): asserts result is Extract<
+    CreateWriteResult,
+    { readonly outcome: "success" }
+  > {
+    if (result.outcome === "unsupported") {
+      throw new MarkdownGatewayError(
+        "UNSUPPORTED",
+        "Drive port cannot safely perform this operation.",
       );
     }
   }

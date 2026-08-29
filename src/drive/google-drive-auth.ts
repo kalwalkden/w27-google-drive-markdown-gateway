@@ -18,17 +18,24 @@ export type GoogleDriveAuthConfig =
 
 export interface GoogleDriveApi {
   readonly files: {
-    get(request: Readonly<Record<string, unknown>>): Promise<{ data: unknown }>;
+    get(
+      request: Readonly<Record<string, unknown>>,
+    ): Promise<GoogleDriveApiResponse>;
     list(
       request: Readonly<Record<string, unknown>>,
-    ): Promise<{ data: unknown }>;
+    ): Promise<GoogleDriveApiResponse>;
   };
+}
+
+export interface GoogleDriveApiResponse {
+  readonly data: unknown;
+  readonly headers?: unknown;
 }
 
 interface GoogleDriveSdkClient {
   readonly files: {
-    get(params: unknown, options?: unknown): Promise<{ data: unknown }>;
-    list(params: unknown): Promise<{ data: unknown }>;
+    get(params: unknown, options?: unknown): Promise<GoogleDriveApiResponse>;
+    list(params: unknown): Promise<GoogleDriveApiResponse>;
   };
 }
 

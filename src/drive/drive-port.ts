@@ -23,12 +23,8 @@ export interface DriveSearchHit {
   readonly excerpt?: string;
 }
 
-export type ConditionalWriteResult =
-  | { readonly outcome: "success"; readonly node: DriveNode }
-  | { readonly outcome: "conflict"; readonly current?: DriveNode }
-  | { readonly outcome: "unsupported" };
-
-export interface DrivePort {
+/** Facts used by MarkdownService to resolve and verify documents. */
+export interface DriveReadPort {
   getNode(id: FileId | FolderId): Promise<DriveNode | undefined>;
   listChildren(folderId: FolderId): Promise<readonly DriveNode[]>;
   listDescendants(
@@ -41,11 +37,24 @@ export interface DrivePort {
     limit: number,
   ): Promise<readonly DriveSearchHit[]>;
   readFile(fileId: FileId): Promise<DriveRead | undefined>;
+}
+
+export type ConditionalWriteResult =
+  | { readonly outcome: "success"; readonly node: DriveNode }
+  | { readonly outcome: "conflict"; readonly current?: DriveNode }
+  | { readonly outcome: "unsupported" };
+
+export type CreateWriteResult =
+  | { readonly outcome: "success"; readonly node: DriveNode }
+  | { readonly outcome: "unsupported" };
+
+/** Provider-facing operations that accept only verified IDs and opaque revisions. */
+export interface RawDriveWritePort {
   createFile(
     parentId: FolderId,
     name: string,
     content: string,
-  ): Promise<DriveNode>;
+  ): Promise<CreateWriteResult>;
   updateFile(
     fileId: FileId,
     expectedRevision: Revision,
@@ -54,6 +63,10 @@ export interface DrivePort {
   moveFile(
     fileId: FileId,
     expectedRevision: Revision,
+    sourceFolderId: FolderId,
     destinationFolderId: FolderId,
   ): Promise<ConditionalWriteResult>;
 }
+
+/** Compatibility name for code that only needs document reads. */
+export type DrivePort = DriveReadPort;

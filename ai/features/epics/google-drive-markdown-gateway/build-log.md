@@ -133,3 +133,17 @@ Durable orchestration record for `ai/features/epics/google-drive-markdown-gatewa
   JWT verification, separate constant-time Codex bearer verification, two minimal principals, and
   fake-only authentication tests.
 - Status: specification complete; implementation pending
+
+## 2026-08-29 — 01-drive-core / 003-guarded-write-and-archive-operations
+
+- Implementation and bounded repair: `gpt-5.6-terra`, high reasoning because this task joins the
+  process-local write lease, application policy, raw ETag reads, and conditional Drive mutations.
+- Root review replaced a fixed multipart delimiter with a collision-checked cryptographic boundary.
+  The second independent Platform Validation review also found that provider-derived hostile names
+  could become gateway paths; Drive names now must match one canonical safe segment, with ID/list/
+  search regression coverage.
+- Validation: full combined `CI=true pnpm check` passed with 109 tests, plus diff, vendored-skill,
+  and credential-pattern checks. All new tests use fakes and captured requests.
+- No live Drive request, credential operation, unconditional retry/fallback, trash, or delete was
+  introduced. Normal composition remains write-disabled until external evidence issues a valid lease.
+- Status: complete; Drive Core awaits independent feature review
