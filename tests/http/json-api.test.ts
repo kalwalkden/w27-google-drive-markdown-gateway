@@ -471,6 +471,58 @@ describe("JSON API", () => {
     }
   });
 
+  it("classifies unsupported JSON charsets and content encodings without dispatching", async () => {
+    const cases: ReadonlyArray<Readonly<Record<string, string>>> = [
+      { "Content-Type": "application/json; charset=iso-8859-1" },
+      {
+        "Content-Type": "application/json",
+        "Content-Encoding": "unsupported",
+      },
+    ];
+
+    for (const headers of cases) {
+      let creates = 0;
+      const events: MarkdownApiAuditEvent[] = [];
+      const session: MarkdownWriteSession = {
+        async createMarkdown() {
+          creates += 1;
+          return metadata;
+        },
+        async updateMarkdown() {
+          return metadata;
+        },
+        async archiveMarkdown() {
+          return metadata;
+        },
+      };
+      const response = await call(
+        {
+          auditLogger: { info: (event) => events.push(event) },
+          writeSessionProvider: { getWriteSession: () => session },
+        },
+        "/v1/markdown/create",
+        {
+          method: "POST",
+          headers: { ...authorized, ...headers },
+          body: JSON.stringify({ path: "docs/new.md", content: "safe" }),
+        },
+      );
+
+      expect(response.status).toBe(415);
+      expect(await response.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: "UNSUPPORTED_MEDIA_TYPE",
+          message: "Request must use application/json.",
+        },
+      });
+      expect(creates).toBe(0);
+      expect(events).toEqual([
+        expect.objectContaining({ result: "unsupported_media_type" }),
+      ]);
+    }
+  });
+
   it("maps domain, upstream, and unknown failures without exposing their messages", async () => {
     const expectations: ReadonlyArray<readonly [Error, number, string]> = [
       [

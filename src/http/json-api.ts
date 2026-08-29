@@ -327,6 +327,15 @@ function isBodyParserInputError(error: unknown): boolean {
   );
 }
 
+function isUnsupportedBodyParserMediaError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const type = Reflect.get(error, "type");
+  return (
+    (type === "charset.unsupported" || type === "encoding.unsupported") &&
+    typeof Reflect.get(error, "status") === "number"
+  );
+}
+
 /**
  * Builds the route-only API. It deliberately accepts a pre-issued write session rather than any
  * write-gate input; an HTTP timeout cannot cancel a dispatched Drive promise and never retries it.
@@ -716,9 +725,11 @@ export function createJsonApiApp(dependencies: JsonApiDependencies): Express {
         respondFailure(
           request,
           response,
-          isBodyParserInputError(_error)
-            ? invalidRequest()
-            : publicFailure(_error),
+          isUnsupportedBodyParserMediaError(_error)
+            ? unsupportedMediaType()
+            : isBodyParserInputError(_error)
+              ? invalidRequest()
+              : publicFailure(_error),
         );
         return;
       }
