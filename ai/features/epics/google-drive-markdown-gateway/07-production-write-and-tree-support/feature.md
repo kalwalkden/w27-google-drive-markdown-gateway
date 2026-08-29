@@ -2,7 +2,7 @@
 
 ## Status
 
-Approved
+Complete
 
 The user delegated the feature-level security and product decisions in this corrective planning
 pass. No open decision remains before task shaping.
