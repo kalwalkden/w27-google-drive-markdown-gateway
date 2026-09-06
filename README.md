@@ -2,14 +2,47 @@
 
 # Google Drive Markdown Gateway
 
-This repository contains a small, security-focused service that lets approved ChatGPT Work and
-Codex clients work with Markdown documents inside one configured Google Drive root.
+A focused bridge between AI tools and your Markdown files in Google Drive. Keep specifications,
+implementation briefs, drafts, and working notes in one folder, and let authenticated ChatGPT Work
+and Codex clients work with the same documents.
 
 The gateway exposes the same six operations through a JSON API and a stateless MCP endpoint: list,
 search, read, create, update, and archive. Google Drive access stays on the server. Clients
 authenticate to the gateway and never receive Google credentials.
 
-The important safety properties are:
+**Current status:** the service, Google Drive adapters, CLI, MCP integration, and deployment tooling
+are implemented. The default deployment is read-only. Live Drive behavior, deployment configuration,
+and each client integration must pass the documented release checks; local tests are not evidence
+of a production deployment or a validated ChatGPT Work installation.
+
+## Why use it?
+
+- **Shared context across tools.** Draft a brief with ChatGPT Work, read it from Codex while
+  implementing, and keep the document in your existing Google Drive workflow.
+- **Ordinary Markdown files.** Content stays in portable UTF-8 `.md` files, accessible through
+  Drive and your preferred Markdown tools.
+- **Conflict-aware editing.** Reads return a revision; updates must supply it. Stale changes fail
+  instead of silently replacing a newer version.
+- **A bounded integration.** The gateway enforces one configured folder tree and six document
+  operations, with no sharing management, permanent deletion, or general-purpose Drive proxy.
+- **Server-side Google access.** Clients use their own gateway authentication. Google credentials
+  stay with the service.
+
+This project handles literal Markdown files, not Google Docs, Sheets, Slides, or binary uploads.
+It is a service and client toolkit, not a document editor.
+
+## What it does
+
+| Operation | Behavior |
+| --- | --- |
+| List | List Markdown files in a folder, optionally including nested folders. |
+| Search | Search filenames and file content within configured limits. |
+| Read | Retrieve content, file identity, and the current revision by path or file ID. |
+| Create | Add a Markdown file under an existing folder; refuse an occupied destination. |
+| Update | Replace a file only when the supplied revision matches. |
+| Archive | Move a file into the configured archive folder using its current revision. |
+
+The service enforces these boundaries:
 
 - access is confined to the configured Markdown root and archive folder;
 - writes are disabled by default and must be enabled by a reviewed deployment;
@@ -17,6 +50,60 @@ The important safety properties are:
 - archive moves a file to the configured archive folder—it never deletes or trashes it; and
 - a conflict, timeout, or `OUTCOME_UNKNOWN` result must be reread and reconciled, never retried
   automatically.
+
+## Use the CLI
+
+The checked-in `md-drive` client emits machine-readable JSON and uses stable exit codes. Build it
+with `pnpm build`, then run it directly from the checkout. It is not a published npm package.
+
+Before making requests, configure a deployed gateway using the
+[client setup guide](docs/codex-cloud-client-setup.md). The client requires `MD_DRIVE_GATEWAY_URL`
+and exactly one of `MD_DRIVE_BEARER_TOKEN` or `MD_DRIVE_BEARER_SECRET_FILE`, supplied outside Git.
+
+```bash
+# Explore an existing folder and read a document.
+node dist/codex-cli/cli.js list --path specs --recursive
+node dist/codex-cli/cli.js search "release plan" --path specs --limit 10
+node dist/codex-cli/cli.js read --path specs/release-plan.md
+```
+
+On a separately approved write-enabled deployment:
+
+```bash
+# Create from a local UTF-8 Markdown file; the destination folder must exist.
+node dist/codex-cli/cli.js create drafts/new-post.md --file ./new-post.md
+
+# Replace REVISION_FROM_READ with the exact revision from the latest read.
+node dist/codex-cli/cli.js update --path specs/release-plan.md \
+  --revision 'REVISION_FROM_READ' --file ./release-plan.md
+
+# Archive only when intended, using this file's latest revision.
+node dist/codex-cli/cli.js archive --path drafts/old-post.md \
+  --revision 'REVISION_FROM_READ'
+```
+
+For updates and archives, read first and retain the exact revision. On `CONFLICT`, reread and
+reconcile the changes. After a timeout or `OUTCOME_UNKNOWN`, inspect the file before deciding what
+to do next; do not automatically retry the mutation. `UNSUPPORTED` is expected for writes on the
+default read-only deployment.
+
+## How it fits together
+
+```text
+ChatGPT Work ── JWT ────── /mcp ─────────────┐
+                                           ├── MarkdownService ── Google Drive
+Codex / md-drive ── bearer ── /v1/markdown/* ┘        │              configured root
+                                              guarded writes
+```
+
+Both interfaces share the same application policy. The service uses TypeScript and Express on
+Node.js 24, with stateless Streamable HTTP MCP. Google authentication supports Shared Drive
+application default credentials or My Drive OAuth refresh tokens. Docker and Terraform assets
+target Google Cloud Run.
+
+The [ChatGPT Work package](plugin/chatgpt-work/README.md) provides registration templates,
+instructions, and a validation checklist. Its installation format and authentication settings
+must be verified for the target tenant; it is not a ready-to-upload universal plugin manifest.
 
 For the detailed component map and change guidance, see [`ARCHITECTURE.md`](ARCHITECTURE.md). The
 original product brief is
@@ -95,3 +182,7 @@ Before planning or implementing any change, run `./scripts/verify-vendored-skill
 workflow in [`AGENTS.md`](AGENTS.md). Never commit Google credentials, OAuth refresh tokens,
 service-account keys, gateway bearer credentials, live evidence, or operator-specific
 configuration.
+
+## License
+
+Licensed under the [MIT License](LICENSE).

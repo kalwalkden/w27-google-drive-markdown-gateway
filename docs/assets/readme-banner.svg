@@ -3,12 +3,12 @@
   <desc id="description">One folder. Shared context. A gateway connecting AI tools to Markdown documents in Google Drive.</desc>
   <defs>
     <linearGradient id="background" x2="1" y2="1">
-      <stop stop-color="#101c30"/>
-      <stop offset="1" stop-color="#102c36"/>
+      <stop stop-color="#11172f"/>
+      <stop offset="1" stop-color="#133d48"/>
     </linearGradient>
     <linearGradient id="accent" x2="1" y2="1">
-      <stop stop-color="#83f0cd"/>
-      <stop offset="1" stop-color="#75bfff"/>
+      <stop stop-color="#a0f5d3"/>
+      <stop offset="1" stop-color="#8ecfff"/>
     </linearGradient>
     <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
       <path d="M32 0H0V32" fill="none" stroke="#b0d9ec" stroke-opacity=".055"/>
@@ -16,19 +16,21 @@
   </defs>
   <rect width="1280" height="420" rx="24" fill="url(#background)"/>
   <rect width="1280" height="420" rx="24" fill="url(#grid)"/>
+  <circle cx="1132" cy="210" r="176" fill="none" stroke="#85ddcf" stroke-opacity=".07"/>
+  <circle cx="1132" cy="210" r="143" fill="none" stroke="#85ddcf" stroke-opacity=".07"/>
   <path d="M0 395H1280" stroke="#7fe4ca" stroke-opacity=".12"/>
   <g font-family="Arial, Helvetica, sans-serif">
-    <rect x="56" y="49" width="224" height="28" rx="14" fill="#183b42" stroke="#35635f"/>
+    <rect x="56" y="49" width="248" height="28" rx="14" fill="#183b42" stroke="#35635f"/>
     <circle cx="73" cy="63" r="4" fill="#83f0cd"/>
-    <text x="86" y="68" font-size="11" font-weight="700" letter-spacing="1.7" fill="#b5f6df">PLAIN TEXT. CONNECTED.</text>
+    <text x="86" y="68" font-size="11" font-weight="700" letter-spacing="1.7" fill="#b5f6df">YOUR FILES. YOUR CONTEXT.</text>
     <text x="56" y="148" font-size="47" font-weight="700" letter-spacing="-1.6" fill="#f4f8fc">Google Drive</text>
     <text x="56" y="207" font-size="47" font-weight="700" letter-spacing="-1.6" fill="url(#accent)">Markdown Gateway</text>
     <text x="58" y="257" font-size="23" fill="#c5d4e2">One folder. Shared context.</text>
-    <text x="58" y="290" font-size="16" fill="#8faabd">A focused bridge between your documents and AI tools.</text>
+    <text x="58" y="290" font-size="16" fill="#a2bdcd">Markdown in Drive. Connected to the tools you build with.</text>
     <g font-size="12" font-weight="700" letter-spacing="1.2" fill="#a7c8d3">
-      <text x="58" y="358">MARKDOWN FIRST</text>
+      <text x="58" y="358">MCP + JSON API</text>
       <circle cx="213" cy="353" r="2" fill="#5e8795"/>
-      <text x="234" y="358">REVISION AWARE</text>
+      <text x="234" y="358">CHECKED WRITES</text>
       <circle cx="387" cy="353" r="2" fill="#5e8795"/>
       <text x="408" y="358">FOLDER SCOPED</text>
     </g>
@@ -47,7 +49,7 @@
       <text x="706" y="148" font-size="17" fill="#e1ebf5">ChatGPT Work</text>
       <rect x="687" y="246" width="150" height="82" rx="14" fill="#172e42" stroke="#345367"/>
       <path d="m707 264 6 5-6 5m12 0h9" fill="none" stroke="#82ccb9" stroke-width="2" stroke-linecap="round"/>
-      <text x="706" y="304" font-size="17" fill="#e1ebf5">Codex cloud</text>
+      <text x="706" y="304" font-size="17" fill="#e1ebf5">Codex / CLI</text>
     </g>
     <rect x="930" y="166" width="80" height="88" rx="19" fill="#1d454d" stroke="#83e4ca" stroke-width="1.5"/>
     <path d="M952 230V197Q952 183 970 183Q988 183 988 197V230M961 230V199Q961 193 970 193Q979 193 979 199V230" fill="none" stroke="#b0f5de" stroke-width="3" stroke-linecap="round"/>
