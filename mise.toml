@@ -1,0 +1,83 @@
+min_version = "2026.9.1"
+
+[settings]
+lockfile = true
+
+[tool_config]
+locked = true
+
+[tools]
+"npm:pnpm" = "11.19.0"
+node = "24"
+
+[tasks.install]
+description = "Install the locked JavaScript dependencies"
+run = "pnpm install --frozen-lockfile"
+
+[tasks.lint]
+description = "Lint the repository"
+run = "pnpm exec biome lint ."
+
+[tasks.format]
+description = "Format the repository"
+run = "pnpm exec biome format --write ."
+
+[tasks."format:check"]
+description = "Check repository formatting"
+run = "pnpm exec biome format ."
+
+[tasks.typecheck]
+description = "Type-check the TypeScript sources"
+run = "pnpm exec tsc --noEmit"
+
+[tasks.test]
+description = "Run the test suite"
+run = "pnpm exec vitest run"
+raw_args = true
+
+[tasks.build]
+description = "Build the production artifacts"
+run = [
+  "pnpm exec tsc -p tsconfig.build.json",
+  "node scripts/mark-cli-executable.mjs",
+]
+
+[tasks."verify:vendored-skills"]
+description = "Verify repository-scoped workflow skills"
+run = "./scripts/verify-vendored-skills.sh"
+
+[tasks.check]
+description = "Run the complete repository validation"
+run = [
+  { task = "lint" },
+  { task = "format:check" },
+  { task = "typecheck" },
+  { task = "test" },
+  { task = "build" },
+  { task = "verify:vendored-skills" },
+]
+
+[tasks."dependencies:production"]
+description = "Remove development-only dependencies from node_modules"
+run = "pnpm prune --prod"
+hide = true
+
+[tasks."codex-cloud:harness"]
+description = "Run the operator-only Codex cloud release harness"
+run = "node dist/codex-cloud/harness-cli.js"
+raw_args = true
+
+[tasks."drive:probe"]
+description = "Run the operator-only live Drive capability probe"
+run = "node dist/live-drive/cli.js"
+raw_args = true
+
+[tasks."migration:plan"]
+description = "Build a local planning-file migration plan"
+run = "node dist/planning-migration/cli.js"
+raw_args = true
+
+[tasks."migration:cutover-preflight"]
+description = "Run the operator-only planning cutover preflight"
+run = "node dist/planning-migration/cutover-preflight-cli.js"
+raw_args = true

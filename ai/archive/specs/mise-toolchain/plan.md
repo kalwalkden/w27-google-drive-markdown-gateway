@@ -22,9 +22,11 @@ Drive access, deployment policy, credentials, or operator authorization gates.
   release line and pnpm 11.19.0. Commit a generated mise lockfile so supported platforms resolve to
   immutable tool artifacts and checksums. Keep `package.json#engines.node` as the published runtime
   compatibility contract, but remove `package.json#packageManager` as a second pnpm version pin.
-- **Use pnpm's Aqua-backed mise registry entry.** At shaping time `mise registry pnpm` resolves first
-  to `aqua:pnpm/pnpm`, with `npm:pnpm` only as a fallback. Pin the backend explicitly so installing
-  pnpm does not require npm or Corepack and registry-order changes cannot change provenance.
+- **Use mise's explicit npm backend for pnpm.** Implementation verification found that the
+  Aqua-provided pnpm 11.19.0 standalone artifact runs on an embedded Node 26 and therefore violates
+  this repository's Node 24 engine. Mise 2026.9.1's built-in `npm:` backend installs pnpm without an
+  external npm or Corepack process; pin `npm:pnpm` explicitly so the mise-managed Node 24 runtime
+  executes pnpm and registry-order changes cannot change provenance.
 - **Make mise tasks the only task definitions.** Move lint, format, format-check, type-check, test,
   build, vendored-skill verification, aggregate check, and operator CLI launchers out of
   `package.json`. Preserve argument forwarding for focused tests and operator commands.
@@ -34,6 +36,10 @@ Drive access, deployment policy, credentials, or operator authorization gates.
 - **Keep `pnpm-workspace.yaml`.** Although this is a single-package repository, the file contains the
   `allowBuilds.esbuild` install-script allowlist. Removing it would weaken the current dependency
   installation policy.
+- **Keep pnpm state inside the repository's ignored store.** The existing `.gitignore` already
+  excludes `.pnpm-store/`. Set `storeDir` in `pnpm-workspace.yaml`, pnpm 11's project configuration
+  surface, so restricted development environments and Docker builds do not require a writable
+  user-level pnpm cache.
 - **Keep the production runtime free of mise and package-manager tooling.** Mise belongs in local,
   CI, and Docker build stages only. The final image remains a non-root Node runtime containing the
   compiled app and production dependencies.
@@ -68,7 +74,9 @@ or security model. Operator-only commands remain explicit and must never become 
 
 Create `mise.toml` at repository root.
 
-- Declare the Node 24 release line and explicitly backed `aqua:pnpm/pnpm` 11.19.0 tool.
+- Declare the explicit `npm:pnpm` 11.19.0 tool followed by the Node 24 release line. Mise gives the
+  first tool's pnpm launcher precedence over Node's bundled Corepack shim; the launcher then resolves
+  `node` from the following Node 24 tool path.
 - Require mise 2026.9.1 or newer using the configuration's supported minimum-version mechanism.
 - Enable project tool lockfiles and require project tools to resolve from the committed lockfile.
 - Do not declare secrets, service endpoints, credential paths, hooks, or automatic live actions.
@@ -103,7 +111,8 @@ Keep `pnpm-lock.yaml` and `pnpm-workspace.yaml`. A metadata-only package edit sh
 dependencies; verify a frozen install leaves the pnpm lockfile unchanged.
 
 Update `.gitignore` for mise's local-only config/cache artifacts while retaining `.pnpm-store/`.
-Do not ignore the shared `mise.toml` or `mise.lock` files.
+Add `storeDir: .pnpm-store` to `pnpm-workspace.yaml`. Do not ignore the shared `mise.toml` or
+`mise.lock` files.
 
 ### 3. Convert the container build without changing runtime behavior
 
@@ -226,4 +235,3 @@ major, absence of mise/pnpm, and `/healthz` startup behavior. Do not publish or 
   trust-all operation if the pinned CLI supports trusting the exact config path.
 - `pnpm-workspace.yaml` is easy to misclassify as redundant; its `allowBuilds.esbuild` policy is why
   it remains.
-

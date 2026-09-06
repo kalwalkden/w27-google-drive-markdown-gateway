@@ -2,7 +2,12 @@
 **
 !package.json
 !pnpm-lock.yaml
+!pnpm-workspace.yaml
+!mise.toml
+!mise.lock
 !tsconfig.json
 !tsconfig.build.json
+!scripts/
+!scripts/mark-cli-executable.mjs
 !src/
 !src/**

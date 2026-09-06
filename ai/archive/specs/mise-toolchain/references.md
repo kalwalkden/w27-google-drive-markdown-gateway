@@ -7,6 +7,7 @@
 | `mise.toml` | New project tool and task configuration | Becomes the canonical Node/pnpm version and task authority. No current edit target exists. |
 | `mise.lock` | New project tool lockfile | Pins resolved tool artifacts/checksums for reproducible locked installs. No current edit target exists. |
 | `package.json` | `packageManager`, `scripts`, `engines`, package metadata | Remove duplicate version/task authority while preserving package/runtime contracts and dependencies. |
+| `pnpm-workspace.yaml` | `allowBuilds`, `storeDir` | Preserve the install-script allowlist and keep pnpm state in the already-ignored `.pnpm-store/`. |
 | `Dockerfile` | dependency/build stages | Replace Corepack and pnpm-script entrypoints with pinned mise setup and tasks; preserve the final runtime. |
 | `.dockerignore` | build-context allowlist | Admit the mise config/lock and `pnpm-workspace.yaml` required by the new build. |
 | `.gitignore` | local tool state exclusions | Ignore only machine-local mise state/config while retaining shared config and lockfiles. |
@@ -38,7 +39,7 @@ Dependency setup:
 
 ```text
 mise install --locked
-  -> mise.lock selects Node 24.x and Aqua pnpm 11.19.0 artifacts
+  -> mise.lock selects Node 24.x and config pins npm:pnpm 11.19.0
 mise run install
   -> pnpm install --frozen-lockfile
   -> pnpm-lock.yaml + pnpm-workspace.yaml install policy
@@ -156,8 +157,8 @@ change is expected.
 
 - Confirm the pinned CLI's exact TOML key for minimum mise version and project-scoped locked-tool
   policy before committing `mise.toml`.
-- Confirm the explicit `aqua:pnpm/pnpm` declaration exposes the `pnpm` binary on every supported
-  locked platform.
+- Confirm the explicit `npm:pnpm` declaration exposes a Node-based `pnpm` launcher on every
+  supported platform and that it reports Node 24 for the project engine check.
 - Confirm structured task references preserve sequential fail-fast behavior and that raw argument
   forwarding accepts the repository's current `-- run ...` operator syntax.
 - Resolve and verify the immutable mise 2026.9.1 container artifact digest/checksum for each Docker

@@ -50,9 +50,9 @@ Build first, then invoke the explicit command. The output must be an unused path
 repository.
 
 ```bash
-pnpm build
+mise run build
 W27_DRIVE_PROBE_OAUTH_SECRET_FILE=/absolute/path/to/oauth-secret.json \
-  pnpm drive:probe -- run \
+  mise run drive:probe -- run \
   --config /absolute/path/to/live-drive-probe.json \
   --output /absolute/path/outside-repository/live-drive-result.json \
   --confirm W27_DRIVE_TEST_ONLY

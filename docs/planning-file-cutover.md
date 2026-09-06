@@ -50,7 +50,7 @@ responses, diagnostics, screenshots, or device/account identities.
 
 Run local preflight only with explicit external paths:
 
-`pnpm migration:cutover-preflight -- run --manifest <repository-manifest> --config <external-config> --output <external-evidence> --confirm W27_PLANNING_CUTOVER_PREFLIGHT_ONLY`
+`mise run migration:cutover-preflight -- run --manifest <repository-manifest> --config <external-config> --output <external-evidence> --confirm W27_PLANNING_CUTOVER_PREFLIGHT_ONLY`
 
 An `INCONCLUSIVE` result is checklist consistency only. It is not live success
 and cannot declare Drive the source of truth.
