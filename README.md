@@ -1,3 +1,5 @@
+![Google Drive Markdown Gateway — One folder. Shared context.](docs/assets/readme-banner.svg)
+
 # Google Drive Markdown Gateway
 
 This repository contains a small, security-focused service that lets approved ChatGPT Work and

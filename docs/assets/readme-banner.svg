@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="420" viewBox="0 0 1280 420" role="img" aria-labelledby="title description">
+  <title id="title">Google Drive Markdown Gateway</title>
+  <desc id="description">One folder. Shared context. A gateway connecting AI tools to Markdown documents in Google Drive.</desc>
+  <defs>
+    <linearGradient id="background" x2="1" y2="1">
+      <stop stop-color="#101c30"/>
+      <stop offset="1" stop-color="#102c36"/>
+    </linearGradient>
+    <linearGradient id="accent" x2="1" y2="1">
+      <stop stop-color="#83f0cd"/>
+      <stop offset="1" stop-color="#75bfff"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#b0d9ec" stroke-opacity=".055"/>
+    </pattern>
+  </defs>
+  <rect width="1280" height="420" rx="24" fill="url(#background)"/>
+  <rect width="1280" height="420" rx="24" fill="url(#grid)"/>
+  <path d="M0 395H1280" stroke="#7fe4ca" stroke-opacity=".12"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <rect x="56" y="49" width="224" height="28" rx="14" fill="#183b42" stroke="#35635f"/>
+    <circle cx="73" cy="63" r="4" fill="#83f0cd"/>
+    <text x="86" y="68" font-size="11" font-weight="700" letter-spacing="1.7" fill="#b5f6df">PLAIN TEXT. CONNECTED.</text>
+    <text x="56" y="148" font-size="47" font-weight="700" letter-spacing="-1.6" fill="#f4f8fc">Google Drive</text>
+    <text x="56" y="207" font-size="47" font-weight="700" letter-spacing="-1.6" fill="url(#accent)">Markdown Gateway</text>
+    <text x="58" y="257" font-size="23" fill="#c5d4e2">One folder. Shared context.</text>
+    <text x="58" y="290" font-size="16" fill="#8faabd">A focused bridge between your documents and AI tools.</text>
+    <g font-size="12" font-weight="700" letter-spacing="1.2" fill="#a7c8d3">
+      <text x="58" y="358">MARKDOWN FIRST</text>
+      <circle cx="213" cy="353" r="2" fill="#5e8795"/>
+      <text x="234" y="358">REVISION AWARE</text>
+      <circle cx="387" cy="353" r="2" fill="#5e8795"/>
+      <text x="408" y="358">FOLDER SCOPED</text>
+    </g>
+    <!-- Two clients converge at a gateway, leading to a Markdown folder. -->
+    <g fill="none" stroke="#568794" stroke-width="2">
+      <path d="M837 132H867Q886 132 886 151V191Q886 210 905 210H930"/>
+      <path d="M837 287H867Q886 287 886 268V229Q886 210 905 210"/>
+      <path d="M1010 210H1058" stroke="#83e4ca"/>
+    </g>
+    <circle cx="869" cy="133" r="4" fill="#88cbeb"/>
+    <circle cx="870" cy="286" r="4" fill="#88cbeb"/>
+    <circle cx="1038" cy="210" r="4" fill="#83f0cd"/>
+    <g>
+      <rect x="687" y="91" width="150" height="82" rx="14" fill="#172e42" stroke="#345367"/>
+      <path d="M705 113H722M705 119H716" stroke="#82ccb9" stroke-width="2" stroke-linecap="round"/>
+      <text x="706" y="148" font-size="17" fill="#e1ebf5">ChatGPT Work</text>
+      <rect x="687" y="246" width="150" height="82" rx="14" fill="#172e42" stroke="#345367"/>
+      <path d="m707 264 6 5-6 5m12 0h9" fill="none" stroke="#82ccb9" stroke-width="2" stroke-linecap="round"/>
+      <text x="706" y="304" font-size="17" fill="#e1ebf5">Codex cloud</text>
+    </g>
+    <rect x="930" y="166" width="80" height="88" rx="19" fill="#1d454d" stroke="#83e4ca" stroke-width="1.5"/>
+    <path d="M952 230V197Q952 183 970 183Q988 183 988 197V230M961 230V199Q961 193 970 193Q979 193 979 199V230" fill="none" stroke="#b0f5de" stroke-width="3" stroke-linecap="round"/>
+    <text x="970" y="281" text-anchor="middle" font-size="12" letter-spacing="1.2" fill="#9bbdc9">GATEWAY</text>
+    <path d="M1060 168Q1060 160 1068 160H1100L1112 174H1196Q1204 174 1204 182V254Q1204 262 1196 262H1068Q1060 262 1060 254Z" fill="#233f4c" stroke="#5c8991" stroke-width="1.5"/>
+    <path d="M1099 148H1140L1157 165V230H1099Z" fill="#ceeadd"/>
+    <path d="M1140 148V165H1157" fill="#8bbdaf"/>
+    <path d="M1060 195H1204V254Q1204 262 1196 262H1068Q1060 262 1060 254Z" fill="#2c5d60" stroke="#79b4a7" stroke-width="1.5"/>
+    <text x="1132" y="236" text-anchor="middle" font-size="25" font-weight="700" font-family="monospace" fill="#baf5dc">.md</text>
+    <text x="1132" y="291" text-anchor="middle" font-size="12" letter-spacing="1.2" fill="#9bbdc9">GOOGLE DRIVE</text>
+  </g>
+</svg>
