@@ -1,0 +1,8 @@
+# Start with an empty context, then allow only build inputs.
+**
+!package.json
+!pnpm-lock.yaml
+!tsconfig.json
+!tsconfig.build.json
+!src/
+!src/**
