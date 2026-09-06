@@ -1,0 +1,43 @@
+{
+  "name": "google-drive-markdown-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "md-drive": "dist/codex-cli/cli.js"
+  },
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "packageManager": "pnpm@11.19.0",
+  "scripts": {
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "tsc -p tsconfig.build.json && node scripts/mark-cli-executable.mjs",
+    "codex-cloud:harness": "node dist/codex-cloud/harness-cli.js",
+    "migration:plan": "node dist/planning-migration/cli.js",
+    "migration:cutover-preflight": "node dist/planning-migration/cutover-preflight-cli.js",
+    "drive:probe": "node dist/live-drive/cli.js",
+    "verify:vendored-skills": "./scripts/verify-vendored-skills.sh",
+    "check": "pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run test && pnpm run build && pnpm run verify:vendored-skills"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "express": "^5.1.0",
+    "google-auth-library": "^10.3.0",
+    "googleapis": "^171.4.0",
+    "jose": "^6.1.3",
+    "pino": "^10.3.1",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.0",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

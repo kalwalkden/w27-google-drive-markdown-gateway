@@ -21,14 +21,25 @@ Treat it as input to feature planning, not as an already approved task-level imp
 
 ## Validation
 
-The current setup check is:
+Run the vendored-skill integrity check before planning or implementation:
 
 ```bash
 ./scripts/verify-vendored-skills.sh
 ```
 
-Once the product is scaffolded, record its canonical lint, type-check, and test commands here and in
-the repository architecture documentation.
+The canonical project validation is:
+
+```bash
+CI=true pnpm lint
+CI=true pnpm format:check
+CI=true pnpm typecheck
+CI=true pnpm test
+CI=true pnpm build
+CI=true pnpm check
+```
+
+`CI=true pnpm check` runs the complete lint, formatting, type-check, test, build, and vendored-skill
+validation sequence. Keep `ARCHITECTURE.md` aligned if these commands change.
 
 ## Security
 
@@ -36,3 +47,19 @@ the repository architecture documentation.
   gateway bearer credentials.
 - Keep Google Drive operations confined to the configured Markdown root.
 - Preserve revision-checked updates and the no-permanent-deletion constraint from the handoff.
+
+<!-- discover-architecture:start -->
+## Architecture
+
+Full report: `ARCHITECTURE.md`
+
+- Domain policy: `src/domain/markdown.ts`, `src/application/markdown-service.ts`
+- Provider boundary: `src/drive/`; production composition: `src/runtime/server.ts`
+- External surfaces: `src/http/json-api.ts`, `src/mcp/stateless-mcp.ts`, `src/codex-cli/cli.ts`
+- Operator-only workflows: `src/live-drive/`, `src/codex-cloud/`, `src/planning-migration/`
+- Lint/format/type-check/test: `CI=true pnpm lint`, `CI=true pnpm format:check`,
+  `CI=true pnpm typecheck`, `CI=true pnpm test`
+- Full validation: `CI=true pnpm check`
+- Keep document rules in `MarkdownService`, compose write authority only in the runtime, and never
+  bypass `GuardedDriveWritePort` or automatically retry an `OUTCOME_UNKNOWN` mutation.
+<!-- discover-architecture:end -->

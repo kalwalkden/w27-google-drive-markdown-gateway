@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "exerciseReference": "template-exercise-reference",
+  "procedureKind": "codex-bearer-rotation",
+  "environmentClass": "non-production",
+  "recordedAt": "2000-01-01T00:00:00.000Z",
+  "outcome": "not-executed",
+  "ownerRole": "service-operator",
+  "approvalReferenceDigest": "template-approval-digest",
+  "steps": [
+    {
+      "name": "authorize",
+      "status": "not-started",
+      "reasonCode": "template"
+    }
+  ],
+  "redaction": {
+    "rawIdentifiersStored": false,
+    "documentContentStored": false,
+    "credentialsStored": false,
+    "requestResponseBodiesStored": false,
+    "urlsStored": false,
+    "errorsOrStacksStored": false,
+    "secretReferencesStored": false
+  },
+  "followUp": {
+    "state": "none",
+    "reference": "template-follow-up-reference"
+  }
+}

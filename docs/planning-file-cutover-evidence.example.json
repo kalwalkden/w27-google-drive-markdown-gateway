@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "w27-planning-file-cutover-evidence-v1",
+  "recordedAt": "2026-01-01T00:00:00.000Z",
+  "releaseIdentifier": "ref-example-release",
+  "environmentIdentifier": "ref-example-environment",
+  "clientProfileIdentifier": "ref-example-client-profile",
+  "manifestSha256": "a96f75296dd32df503efaa27e03876a277a73211309b6a080658c2a216cd8267",
+  "imageDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "nonSecretRuntimeDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "liveDriveProbeDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "deploymentWriteMode": "default-off",
+  "overall": "BLOCKED",
+  "gates": {
+    "write": { "status": "BLOCKED", "reason": "WRITE_UNAVAILABLE" },
+    "archive": { "status": "NOT_STARTED", "reason": "NONE" },
+    "destination": { "status": "NOT_STARTED", "reason": "NONE" },
+    "readback": { "status": "NOT_STARTED", "reason": "NONE" }
+  },
+  "clients": {
+    "work": { "status": "NOT_STARTED", "reason": "NONE" },
+    "codex": { "status": "NOT_STARTED", "reason": "NONE" },
+    "macos": { "status": "NOT_STARTED", "reason": "NONE" },
+    "iphone": { "status": "NOT_STARTED", "reason": "NONE" },
+    "ipad": { "status": "NOT_STARTED", "reason": "NONE" }
+  },
+  "operations": {
+    "list": { "status": "NOT_STARTED", "reason": "NONE" },
+    "search": { "status": "NOT_STARTED", "reason": "NONE" },
+    "read": { "status": "NOT_STARTED", "reason": "NONE" },
+    "create": { "status": "NOT_STARTED", "reason": "NONE" },
+    "update": { "status": "NOT_STARTED", "reason": "NONE" },
+    "archive": { "status": "NOT_STARTED", "reason": "NONE" }
+  },
+  "duplicateCreate": { "status": "NOT_STARTED", "reason": "NONE" },
+  "staleUpdate": { "status": "NOT_STARTED", "reason": "NONE" },
+  "archiveVerification": { "status": "NOT_STARTED", "reason": "NONE" },
+  "cleanup": { "status": "NOT_STARTED", "reason": "NONE" },
+  "sourceOfTruth": "not-declared",
+  "manualRecovery": { "status": "NOT_STARTED", "reason": "NONE" }
+}

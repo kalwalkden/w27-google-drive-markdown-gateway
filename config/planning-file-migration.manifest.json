@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "w27-planning-file-migration-manifest-v1",
+  "topology": "bounded-nested-v1",
+  "entries": [
+    {
+      "key": "gateway-handoff",
+      "classification": "brief",
+      "sourcePath": "google-drive-markdown-gateway-handoff.md",
+      "targetPath": "briefs/google-drive-markdown-gateway-handoff.md",
+      "sourceSha256": "d6cca167761bbaa0d73843621b21f7e5b64ca48bd64897050cd00f3fa096d18d",
+      "collisionPolicy": "fail",
+      "sourceDisposition": "frozen-bootstrap-reference"
+    }
+  ]
+}

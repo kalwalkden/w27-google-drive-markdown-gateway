@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "authMode": "shared-drive-adc",
+  "testRootFolderId": "operator-supplied-test-root",
+  "archiveFolderId": "operator-supplied-archive-child",
+  "requestTimeoutMs": 30000
+}
