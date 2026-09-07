@@ -13,11 +13,24 @@ describe("deployment assets", () => {
     ]);
     expect(dockerfile).toMatch(/FROM node:24-slim AS dependencies/);
     expect(dockerfile).toMatch(/FROM node:24-slim AS runtime/);
-    expect(dockerfile).toContain("pnpm install --frozen-lockfile");
-    expect(dockerfile).toContain("pnpm build");
+    expect(dockerfile).toContain("ARG MISE_VERSION=2026.9.1");
+    expect(dockerfile).toContain("sha256sum --check --strict");
+    expect(dockerfile).toContain("COPY mise.toml mise.lock");
+    expect(dockerfile).toContain(
+      "package.json pnpm-lock.yaml pnpm-workspace.yaml",
+    );
+    expect(dockerfile).toContain("mise install && mise run install");
+    expect(dockerfile).toContain(
+      "mise run build && mise run dependencies:production",
+    );
+    expect(dockerfile).not.toContain("corepack");
     expect(dockerfile).toContain("USER node");
     expect(dockerfile).toContain('CMD ["node", "dist/runtime/entry.js"]');
     expect(dockerignore).toContain("**");
+    expect(dockerignore).toContain("!mise.toml");
+    expect(dockerignore).toContain("!mise.lock");
+    expect(dockerignore).toContain("!pnpm-workspace.yaml");
+    expect(dockerignore).toContain("!scripts/mark-cli-executable.mjs");
     expect(dockerignore).not.toContain("!node_modules");
     expect(dockerignore).not.toContain("!.env");
   });

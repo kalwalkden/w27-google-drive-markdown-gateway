@@ -17,7 +17,8 @@ gates; local tests never constitute live validation.
 ## Operator setup
 
 1. Check out the approved revision, run `./scripts/verify-vendored-skills.sh`,
-   then build the checked-in client with `pnpm build`. Run it as
+   then install the locked toolchain and dependencies with `mise install` and `mise run install`,
+   then build the checked-in client with `mise run build`. Run it as
    `node dist/codex-cli/cli.js`; do not globally install a client or download
    an unpinned package.
 2. In the current Codex cloud environment controls, verify and record whether
@@ -56,7 +57,7 @@ available. Explicit archive intent is required. Do not substitute raw HTTP,
 
 ## Operator-only release check
 
-`pnpm codex-cloud:harness -- run --config <external-config> --output
+`mise run codex-cloud:harness -- run --config <external-config> --output
 <external-evidence> --confirm W27_CODEX_CLOUD_TEST_ONLY` is never CI/setup
 behavior. Run it only in a clean, operator-configured cloud environment with a
 pre-provisioned nested validation folder and external output path, only after a

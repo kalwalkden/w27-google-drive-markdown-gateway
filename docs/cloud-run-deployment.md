@@ -16,8 +16,9 @@ Choose one Drive mode before preparing inputs:
 
 The deployment operator needs organization-approved access to Artifact Registry, Secret Manager,
 Cloud Run, and the Terraform state backend. Google Cloud APIs are enabled outside this module to
-respect organization policy. Local checks require Node 24 with pnpm and Terraform; image publishing
-also requires an approved container build environment and Google Cloud CLI.
+respect organization policy. Local checks require mise 2026.9.1 or newer, which provisions the
+locked Node 24 and pnpm toolchain, plus Terraform; image publishing also requires an approved
+container build environment and Google Cloud CLI.
 
 Create secret containers and versions through the approved secret-management process. Never put a
 bearer credential, OAuth credential object, refresh token, client secret, or service-account key

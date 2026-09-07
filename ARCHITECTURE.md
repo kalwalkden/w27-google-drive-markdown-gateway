@@ -2,8 +2,9 @@
 
 ## Detected stack
 
-- Runtime: strict TypeScript 5.9 compiled to ESM for Node 24, managed with pnpm 11
-  (`package.json`, `tsconfig.json`, `tsconfig.build.json`). Local imports use `.js` extensions so the
+- Runtime: strict TypeScript 5.9 compiled to ESM for Node 24, with mise managing the Node 24 and
+  pnpm 11 toolchain (`mise.toml`, `mise.lock`, `package.json`, `tsconfig.json`,
+  `tsconfig.build.json`). Local imports use `.js` extensions so the
   emitted NodeNext modules run without a loader.
 - Service: Express 5 exposes a JSON API and stateless Streamable HTTP MCP; Zod validates every
   configuration and transport boundary, `jose` verifies Work JWTs, and Pino emits allowlisted audit
@@ -72,16 +73,18 @@ deployment config + mounted secrets --> runtime composition  +--> guarded write 
 
 ## Linting, testing, and operational commands
 
-- Lint: `CI=true pnpm lint`
-- Formatting check: `CI=true pnpm format:check`; deliberate rewrite: `pnpm format`
-- Type-check: `CI=true pnpm typecheck`
-- Unit/integration tests: `CI=true pnpm test`
-- Production build: `CI=true pnpm build`
-- Complete repository validation: `CI=true pnpm check` (also verifies the ten vendored workflow
+- Tool and dependency setup: `mise install` followed by `mise run install`
+- Lint: `CI=true mise run lint`
+- Formatting check: `CI=true mise run format:check`; deliberate rewrite: `mise run format`
+- Type-check: `CI=true mise run typecheck`
+- Unit/integration tests: `CI=true mise run test`
+- Production build: `CI=true mise run build`
+- Complete repository validation: `CI=true mise run check` (also verifies the ten vendored workflow
   skills)
 - Vendored-skill integrity only: `./scripts/verify-vendored-skills.sh`
-- Built operator tools: `pnpm codex-cloud:harness`, `pnpm drive:probe`, `pnpm migration:plan`, and
-  `pnpm migration:cutover-preflight`; use only with their corresponding `docs/` runbook and required
+- Built operator tools: `mise run codex-cloud:harness`, `mise run drive:probe`,
+  `mise run migration:plan`, and `mise run migration:cutover-preflight`; use only with their
+  corresponding `docs/` runbook and required
   external configuration/evidence paths.
 - Terraform validation is operator-scoped: from `infra/terraform/`, run `terraform fmt -check` and
   `terraform validate` after `terraform init`; plans/applies require the approvals documented in

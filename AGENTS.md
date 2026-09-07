@@ -30,15 +30,15 @@ Run the vendored-skill integrity check before planning or implementation:
 The canonical project validation is:
 
 ```bash
-CI=true pnpm lint
-CI=true pnpm format:check
-CI=true pnpm typecheck
-CI=true pnpm test
-CI=true pnpm build
-CI=true pnpm check
+CI=true mise run lint
+CI=true mise run format:check
+CI=true mise run typecheck
+CI=true mise run test
+CI=true mise run build
+CI=true mise run check
 ```
 
-`CI=true pnpm check` runs the complete lint, formatting, type-check, test, build, and vendored-skill
+`CI=true mise run check` runs the complete lint, formatting, type-check, test, build, and vendored-skill
 validation sequence. Keep `ARCHITECTURE.md` aligned if these commands change.
 
 ## Security
@@ -57,9 +57,9 @@ Full report: `ARCHITECTURE.md`
 - Provider boundary: `src/drive/`; production composition: `src/runtime/server.ts`
 - External surfaces: `src/http/json-api.ts`, `src/mcp/stateless-mcp.ts`, `src/codex-cli/cli.ts`
 - Operator-only workflows: `src/live-drive/`, `src/codex-cloud/`, `src/planning-migration/`
-- Lint/format/type-check/test: `CI=true pnpm lint`, `CI=true pnpm format:check`,
-  `CI=true pnpm typecheck`, `CI=true pnpm test`
-- Full validation: `CI=true pnpm check`
+- Lint/format/type-check/test: `CI=true mise run lint`, `CI=true mise run format:check`,
+  `CI=true mise run typecheck`, `CI=true mise run test`
+- Full validation: `CI=true mise run check`
 - Keep document rules in `MarkdownService`, compose write authority only in the runtime, and never
   bypass `GuardedDriveWritePort` or automatically retry an `OUTCOME_UNKNOWN` mutation.
 <!-- discover-architecture:end -->

@@ -54,7 +54,7 @@ The service enforces these boundaries:
 ## Use the CLI
 
 The checked-in `md-drive` client emits machine-readable JSON and uses stable exit codes. Build it
-with `pnpm build`, then run it directly from the checkout. It is not a published npm package.
+with `mise run build`, then run it directly from the checkout. It is not a published npm package.
 
 Before making requests, configure a deployed gateway using the
 [client setup guide](docs/codex-cloud-client-setup.md). The client requires `MD_DRIVE_GATEWAY_URL`
@@ -113,19 +113,20 @@ implementation history and approved feature plans are under
 
 ## Test locally
 
-Local development requires Node.js 24 and pnpm 11.19.0. A normal local test run uses fakes and
-in-memory adapters; it does not need Google credentials, call Google Drive, deploy anything, or
-enable writes.
+Local development requires mise 2026.9.1 or newer. The checked-in mise configuration installs the
+locked Node.js 24 and pnpm 11.19.0 toolchain. A normal local test run uses fakes and in-memory
+adapters; it does not need Google credentials, call Google Drive, deploy anything, or enable writes.
 
 From a fresh checkout:
 
 ```bash
 ./scripts/verify-vendored-skills.sh
-pnpm install --frozen-lockfile
-CI=true pnpm check
+mise install
+mise run install
+CI=true mise run check
 ```
 
-`pnpm check` is the complete repository validation. It runs linting, formatting checks, strict
+`mise run check` is the complete repository validation. It runs linting, formatting checks, strict
 TypeScript checking, the Vitest suite, the production build, and the vendored-workflow integrity
 check.
 
@@ -133,13 +134,13 @@ For a quicker check while developing, run the relevant command directly:
 
 | What to check | Command |
 | --- | --- |
-| Lint | `CI=true pnpm lint` |
-| Formatting without changing files | `CI=true pnpm format:check` |
-| Apply formatting | `pnpm format` |
-| Types | `CI=true pnpm typecheck` |
-| Automated tests | `CI=true pnpm test` |
-| One test file | `CI=true pnpm test tests/domain/markdown.test.ts` |
-| Production build and `md-drive` CLI | `CI=true pnpm build` |
+| Lint | `CI=true mise run lint` |
+| Formatting without changing files | `CI=true mise run format:check` |
+| Apply formatting | `mise run format` |
+| Types | `CI=true mise run typecheck` |
+| Automated tests | `CI=true mise run test` |
+| One test file | `CI=true mise run test -- tests/domain/markdown.test.ts` |
+| Production build and `md-drive` CLI | `CI=true mise run build` |
 | Vendored workflow files only | `./scripts/verify-vendored-skills.sh` |
 
 Live Drive probes, client release checks, Terraform plans/applies, secret rotation, and migration
